@@ -20,6 +20,7 @@ class AppController:
 
         start_ui.on_start_game_clicked.connect(self.show_game_card)
         start_ui.on_manager_flow_clicked.connect(self.show_flow_manager_card)
+        start_ui.send_log.connect(self.on_log_request)
 
         self._set_current_card(start_ui)
 
@@ -28,7 +29,7 @@ class AppController:
         print("控制器：切换到 GameCard")
         game_ui = cards.game_card.GameCard()
         game_ui.return_to_menu_requested.connect(self.show_start_card)
-
+        game_ui.send_log.connect(self.on_log_request)
         self._set_current_card(game_ui)
 
     def show_flow_manager_card(self):
@@ -37,6 +38,7 @@ class AppController:
 
         # flow_manager_card的返回信号也连接到显示主菜单的槽
         flow_manager_ui.return_to_menu_requested.connect(self.show_start_card)
+        flow_manager_ui.send_log.connect(self.on_log_request)
 
         self._set_current_card(flow_manager_ui)
 

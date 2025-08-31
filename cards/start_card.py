@@ -21,6 +21,7 @@ class DarkFramelessWindow(QWidget):
 
     on_start_game_clicked = Signal()
     on_manager_flow_clicked = Signal()
+    send_log = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)

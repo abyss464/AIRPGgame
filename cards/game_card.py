@@ -3,6 +3,7 @@ from PySide6.QtWidgets import QWidget, QPushButton, QVBoxLayout, QLabel
 
 class GameCard(QWidget):
     return_to_menu_requested = Signal()
+    send_log = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
