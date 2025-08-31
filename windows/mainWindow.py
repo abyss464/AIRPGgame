@@ -3,7 +3,7 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
     QTextEdit, QPushButton, QSplitter, QScrollArea
 )
-from PySide6.QtCore import Qt, QSize
+from PySide6.QtCore import Qt, QSize, Signal, QObject
 from PySide6.QtGui import QIcon, QFont
 
 # 导入设置窗口类
@@ -30,17 +30,13 @@ class MainWindow(QMainWindow):
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
 
-        # --- 创建左侧面板 ---
         left_panel = QWidget()
         left_panel.setObjectName("LeftPanel")
 
-        # 这是左侧面板的主布局
         left_layout = QVBoxLayout(left_panel)
         left_layout.setContentsMargins(10, 10, 10, 10)
         left_layout.setSpacing(10)
 
-        # --- 新增：专门用于容纳卡片的区域和布局 ---
-        # 创建一个 QWidget 作为卡片的容器
         self.card_container = QWidget()
         # 为这个容器创建一个垂直布局
         self.card_layout = QVBoxLayout(self.card_container)
@@ -49,26 +45,21 @@ class MainWindow(QMainWindow):
         self.card_layout.setAlignment(Qt.AlignTop)  # 确保卡片从顶部开始排列
 
         left_layout.addWidget(self.card_container)
-        # --- 新增结束 ---
 
-        # 伸缩器，将设置按钮推到底部
         left_layout.addStretch(1)
 
-        # 创建左下角的设置按钮
         self.settings_button = QPushButton("⚙")
         self.settings_button.setObjectName("SettingsButton")
         self.settings_button.setFixedSize(40, 40)
         self.settings_button.setToolTip("打开设置")
         left_layout.addWidget(self.settings_button, 0, Qt.AlignBottom | Qt.AlignLeft)
 
-        # --- 创建右侧代码输出框 ---
         self.output_box = QTextEdit()
         self.output_box.setObjectName("OutputBox")
         self.output_box.setReadOnly(True)
         font = QFont("Consolas", 11)
         self.output_box.setFont(font)
 
-        # --- 使用 QSplitter 实现左右分割 ---
         splitter = QSplitter(Qt.Horizontal)
         splitter.addWidget(left_panel)
         splitter.addWidget(self.output_box)
@@ -146,17 +137,17 @@ class MainWindow(QMainWindow):
         """
         清空左侧面板中的所有卡片。
         """
-        # 安全地清空布局中的所有控件
         while self.card_layout.count():
             child = self.card_layout.takeAt(0)
             if child.widget():
-                # deleteLater 会在事件循环空闲时安全地删除对象
                 child.widget().deleteLater()
 
     def append_output(self, text: str):
-        """向右侧的代码输出框中追加文本。"""
         self.output_box.append(text)
         self.output_box.verticalScrollBar().setValue(self.output_box.verticalScrollBar().maximum())
+
+    def clear_output(self):
+        self.output_box.clear()
 
     def open_settings_window(self):
         """打开设置窗口。"""
@@ -164,4 +155,3 @@ class MainWindow(QMainWindow):
             self.settings_window = settingWindow.SettingWindow(self)
         self.settings_window.show()
         self.settings_window.activateWindow()
-

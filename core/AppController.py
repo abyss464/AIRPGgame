@@ -7,6 +7,9 @@ class AppController:
         self.win = main_window
         self.current_card = None
 
+    def on_log_request(self, text: str):
+        self.win.append_output(text)
+
     def start(self):
         self.show_start_card()
 
