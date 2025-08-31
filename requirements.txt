@@ -1,0 +1,3 @@
+openai>=1.0.0  # OpenAI 官方库
+PySide6>=6.5.0  # Qt for Python (用于 GUI)
+requests>=2.31.0  # HTTP 请求库
