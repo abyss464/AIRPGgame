@@ -3,6 +3,7 @@ from functools import partial
 # 1. 导入两个核心逻辑类
 from manager.json_flow_manager import JsonWorkflowManager
 from manager.prompt_manager import PromptManager, PROMPT_TYPES
+from manager.model_config_manager import ModelConfigManager
 
 from PySide6.QtCore import Signal, Qt
 from PySide6.QtWidgets import (
@@ -18,14 +19,7 @@ ITEM_TYPE_ROLE = Qt.UserRole + 1
 ITEM_ID_ROLE = Qt.UserRole + 2
 ITEM_PARENT_IDS_ROLE = Qt.UserRole + 3
 
-
-# ==============================================================================
-#  2. 全局提示词管理对话框 (PromptManagerDialog)
-#  (这部分代码是独立的对话框，保持不变)
-# ==============================================================================
 class PromptManagerDialog(QDialog):
-    # ... 此处为 PromptManagerDialog 的完整代码，为了简洁省略 ...
-    # --- 为了您的方便，我将完整代码粘贴在这里 ---
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("全局提示词管理器")
@@ -122,14 +116,7 @@ class PromptManagerDialog(QDialog):
                                                                                                      self.content_edit.toPlainText()); self.manager.save_prompts(); QMessageBox.information(
             self, "成功", "已保存。"); self._populate_tree()
 
-
-# ==============================================================================
-#  3. 提示词构造器对话框 (PromptBuilderDialog)
-#  (这部分代码是独立的对话框，保持不变)
-# ==============================================================================
 class PromptBuilderDialog(QDialog):
-    # ... 此处为 PromptBuilderDialog 的完整代码，为了简洁省略 ...
-    # --- 为了您的方便，我将完整代码粘贴在这里 ---
     def __init__(self, parent=None):
         super().__init__(parent);
         self.setWindowTitle("提示词构造器");
@@ -209,6 +196,7 @@ class HierarchicalFlowManagerUI(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.manager = JsonWorkflowManager('workflows.json')
+        self.model_manager = ModelConfigManager()
 
         # 主布局
         main_layout = QVBoxLayout(self)
@@ -299,8 +287,9 @@ class HierarchicalFlowManagerUI(QWidget):
         self.build_prompt_btn.clicked.connect(self._open_prompt_builder);
         prompt_header_layout.addWidget(self.build_prompt_btn)
         self.step_prompt_edit = QTextEdit()
-        self.step_provider_edit = QLineEdit();
-        self.step_model_edit = QLineEdit();
+        self.step_provider_combo = QComboBox()
+        self.step_model_combo = QComboBox()
+        self.step_provider_combo.currentTextChanged.connect(self._update_step_model_combo)
         self.step_read_file_edit = QLineEdit();
         self.step_save_file_edit = QLineEdit();
         self.step_use_context_check = QCheckBox();
@@ -309,8 +298,8 @@ class HierarchicalFlowManagerUI(QWidget):
         step_layout.addRow("名称:", self.step_name_edit);
         step_layout.addRow(prompt_header_layout);
         step_layout.addRow(self.step_prompt_edit);
-        step_layout.addRow("服务商:", self.step_provider_edit);
-        step_layout.addRow("模型:", self.step_model_edit);
+        step_layout.addRow("服务商:", self.step_provider_combo)
+        step_layout.addRow("模型:", self.step_model_combo)
         step_layout.addRow("从文件读入:", self.step_read_file_edit);
         step_layout.addRow("存入指定文件:", self.step_save_file_edit);
         step_layout.addRow("使用上下文:", self.step_use_context_check);
@@ -318,6 +307,39 @@ class HierarchicalFlowManagerUI(QWidget):
         step_layout.addRow(step_save_btn)
         self.stacked_widget.addWidget(self.step_details_widget);
         step_save_btn.clicked.connect(partial(self._save_details, "step"))
+
+    def _update_step_provider_combo(self):
+        """用 model_manager 中的数据填充服务商下拉框"""
+        # 保存当前选择，以便刷新后恢复
+        current_provider = self.step_provider_combo.currentText()
+
+        # 阻止信号触发，避免在填充时重复更新模型列表
+        self.step_provider_combo.blockSignals(True)
+        self.step_provider_combo.clear()
+
+        providers = self.model_manager.list_providers()
+        if providers:
+            self.step_provider_combo.addItems(providers)
+            # 尝试恢复之前的选择
+            if current_provider in providers:
+                self.step_provider_combo.setCurrentText(current_provider)
+
+        # 重新启用信号
+        self.step_provider_combo.blockSignals(False)
+        # 手动触发一次，确保模型列表与当前服务商同步
+        self._update_step_model_combo(self.step_provider_combo.currentText())
+
+    def _update_step_model_combo(self, provider_name: str):
+        """当服务商变化时，更新模型下拉框"""
+        current_model = self.step_model_combo.currentText()
+        self.step_model_combo.clear()
+
+        if provider_name:
+            models = self.model_manager.list_available_models(provider_name)
+            if models:
+                self.step_model_combo.addItems(models)
+                if current_model in models:
+                    self.step_model_combo.setCurrentText(current_model)
 
     def _open_prompt_builder(self):
         dialog = PromptBuilderDialog(self)
@@ -379,33 +401,65 @@ class HierarchicalFlowManagerUI(QWidget):
 
     def _update_details_panel(self):
         item_type, item_id, parent_ids = self._get_selected_item_info()
-        if not item_type or not item_id: self.stacked_widget.setCurrentIndex(0); return
+        if not item_type or not item_id:
+            self.stacked_widget.setCurrentIndex(0)
+            return
+
         data = None
         if item_type == "workflow":
             data = self.manager.get_workflow(item_id)
         elif item_type == "node" and parent_ids:
-            wf_data = self.manager.get_workflow(parent_ids["wf_id"]); data = wf_data.get('nodes', {}).get(
-                item_id) if wf_data else None
+            wf_data = self.manager.get_workflow(parent_ids["wf_id"])
+            data = wf_data.get('nodes', {}).get(item_id) if wf_data else None
         elif item_type == "step" and parent_ids:
-            wf_data = self.manager.get_workflow(parent_ids["wf_id"]); node_data = wf_data.get('nodes', {}).get(
-                parent_ids["node_id"]) if wf_data else None; data = next(
-                (s for s in node_data.get('steps', []) if s.get('step_id') == item_id), None) if node_data else None
-        if not data: self.stacked_widget.setCurrentIndex(0); return
+            wf_data = self.manager.get_workflow(parent_ids["wf_id"])
+            node_data = wf_data.get('nodes', {}).get(parent_ids["node_id"]) if wf_data else None
+            data = next((s for s in node_data.get('steps', []) if s.get('step_id') == item_id),
+                        None) if node_data else None
+
+        if not data:
+            self.stacked_widget.setCurrentIndex(0)
+            return
+
         if item_type == "workflow":
-            self.wf_name_edit.setText(data.get("name", "")); self.wf_desc_edit.setText(
-                data.get("description", "")); self.stacked_widget.setCurrentIndex(1)
+            self.wf_name_edit.setText(data.get("name", ""))
+            self.wf_desc_edit.setText(data.get("description", ""))
+            self.stacked_widget.setCurrentIndex(1)
+
         elif item_type == "node":
-            self.node_name_edit.setText(data.get("name", "")); self.node_loop_check.setChecked(
-                data.get("loop", False)); self.stacked_widget.setCurrentIndex(2)
+            self.node_name_edit.setText(data.get("name", ""))
+            self.node_loop_check.setChecked(data.get("loop", False))
+            self.stacked_widget.setCurrentIndex(2)
+
         elif item_type == "step":
-            self.step_name_edit.setText(data.get("name", "")); self.step_prompt_edit.setText(
-                data.get("prompt", "")); self.step_provider_edit.setText(
-                data.get("provider", "")); self.step_model_edit.setText(
-                data.get("model", "")); self.step_read_file_edit.setText(
-                data.get("read_from_file") or ""); self.step_save_file_edit.setText(
-                data.get("save_to_file") or ""); self.step_use_context_check.setChecked(
-                data.get("use_context", False)); self.step_output_console_check.setChecked(
-                data.get("output_to_console", False)); self.stacked_widget.setCurrentIndex(3)
+            # --- 以下是针对 Step 详情页的核心修改 ---
+
+            # 1. 填充其他常规输入框
+            self.step_name_edit.setText(data.get("name", ""))
+            self.step_prompt_edit.setText(data.get("prompt", ""))
+            self.step_read_file_edit.setText(data.get("read_from_file") or "")
+            self.step_save_file_edit.setText(data.get("save_to_file") or "")
+            self.step_use_context_check.setChecked(data.get("use_context", False))
+            self.step_output_console_check.setChecked(data.get("output_to_console", False))
+
+            # 2. 动态填充并设置服务商(Provider)下拉框
+            # 首先，用所有可用的服务商填充下拉框
+            self._update_step_provider_combo()
+            # 然后，从当前步骤的数据中获取已保存的服务商名称
+            saved_provider = data.get("provider", "")
+            # 将下拉框的当前选项设置为这个已保存的服务商
+            self.step_provider_combo.setCurrentText(saved_provider)
+
+            # 3. 动态填充并设置模型(Model)下拉框
+            # 根据上面设置好的服务商，填充对应的模型列表
+            self._update_step_model_combo(saved_provider)
+            # 从当前步骤的数据中获取已保存的模型名称
+            saved_model = data.get("model", "")
+            # 将模型下拉框的当前选项设置为这个已保存的模型
+            self.step_model_combo.setCurrentText(saved_model)
+
+            # 4. 最后，切换到 Step 详情页
+            self.stacked_widget.setCurrentIndex(3)
 
     def _add_item(self):
         item_type, item_id, parent_ids = self._get_selected_item_info()
@@ -451,8 +505,8 @@ class HierarchicalFlowManagerUI(QWidget):
                 self.manager.edit_step(parent_ids["wf_id"], parent_ids["node_id"], item_id,
                                        {"name": self.step_name_edit.text(),
                                         "prompt": self.step_prompt_edit.toPlainText(),
-                                        "provider": self.step_provider_edit.text(),
-                                        "model": self.step_model_edit.text(),
+                                        "provider": self.step_provider_combo.currentText(),  # 从ComboBox获取
+                                        "model": self.step_model_combo.currentText(),        # 从ComboBox获取
                                         "read_from_file": self.step_read_file_edit.text() or None,
                                         "save_to_file": self.step_save_file_edit.text() or None,
                                         "use_context": self.step_use_context_check.isChecked(),
