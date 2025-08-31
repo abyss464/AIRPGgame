@@ -34,7 +34,7 @@ class AppController:
 
     def show_flow_manager_card(self):
         print("控制器：切换到 FlowManagerCard")
-        flow_manager_ui = cards.flow_manage_card.FlowManagerCard()
+        flow_manager_ui = cards.flow_manage_card.HierarchicalFlowManagerUI()
 
         # flow_manager_card的返回信号也连接到显示主菜单的槽
         flow_manager_ui.return_to_menu_requested.connect(self.show_start_card)
