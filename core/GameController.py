@@ -4,7 +4,7 @@ import os
 import time
 from typing import List, Dict, Any, Optional
 
-from PySide6.QtCore import QObject, Signal, QMutex, QWaitCondition, QMetaObject, Qt
+from PySide6.QtCore import QObject, Signal, QMutex, QWaitCondition, QMetaObject, Qt, Slot
 
 # 假设这些类存在于您的项目结构中
 from core.ModelLinker import ModelLinker
@@ -14,11 +14,13 @@ from manager.model_config_manager import ModelConfigManager
 class GameController(QObject):
     """
     一个强大的游戏流程控制器，能够加载、运行、保存和继续基于JSON定义的工作流。
-    此类被设计为在工作线程中运行，通过信号与主UI线程通信。
+    此类被设计为在工作线程中运行，通过信号与主UI线程通信，并使用非阻塞的事件驱动循环。
     """
     ai_response = Signal(str)
     input_requested = Signal(str)
     game_finished = Signal()
+
+    _process_next_node_signal = Signal()
 
     def __init__(self, workflow_file_path: str = "workflows.json"):
         super().__init__()
@@ -41,6 +43,7 @@ class GameController(QObject):
         self.wait_condition = QWaitCondition()
         self.user_input: Optional[str] = None
         self.is_stopped = False
+        self._process_next_node_signal.connect(self._process_next_node)
 
     def _load_workflows(self, file_path: str) -> Dict[str, Any]:
         """从文件加载所有工作流。"""
@@ -51,7 +54,7 @@ class GameController(QObject):
             print(f"[Controller] 错误: 无法加载或解析工作流文件: {file_path} - {e}")
             return {}
 
-    # --- 公共槽函数(Slots)，由UI线程调用以启动游戏 ---
+    # --- 公共槽函数(Slots)，由UI线程通过信号调用 ---
     def run(self, workflow_name: str):
         """槽函数：开始一个全新的游戏流程。"""
         self.is_stopped = False
@@ -62,11 +65,10 @@ class GameController(QObject):
             return
 
         self._setup_game_state(workflow_id)
-        nodes = self.current_workflow_data.get("nodes", {})
-        self.node_keys = list(nodes.keys())
-
+        self.node_keys = list(self.current_workflow_data.get("nodes", {}).keys())
         print(f"[Controller] 开始新游戏: '{self.current_workflow_name}'...")
-        self._process_next_node()
+        # 【关键】启动事件驱动的流程
+        self._process_next_node_signal.emit()
 
     def load_and_run(self, workflow_name: str, slot_name: str = "autosave"):
         """槽函数：加载一个已保存的游戏并从断点处继续。"""
@@ -78,14 +80,12 @@ class GameController(QObject):
             return
 
         self._setup_game_state(workflow_id)
-        # BUGFIX: 需要在加载存档前准备好 node_keys
-        nodes = self.current_workflow_data.get("nodes", {})
-        self.node_keys = list(nodes.keys())
+        self.node_keys = list(self.current_workflow_data.get("nodes", {}).keys())
 
         save_file = os.path.join(self.base_path, "saves", f"{slot_name}.json")
         if not os.path.exists(save_file):
             print(f"[Controller] 错误：在 '{self.current_workflow_name}' 中找不到存档 '{slot_name}'。将开始新游戏。")
-            self._process_next_node()
+            self._process_next_node_signal.emit()
             return
 
         try:
@@ -94,33 +94,35 @@ class GameController(QObject):
             self.current_node_index = save_data.get("current_node_index", 0)
             self.context = save_data.get("context", [])
             print(f"[Controller] 成功加载游戏: '{self.current_workflow_name}' (存档: {slot_name})...")
-            self._process_next_node()
+            # 【关键】从加载点启动事件驱动的流程
+            self._process_next_node_signal.emit()
         except Exception as e:
             print(f"[Controller] 加载存档失败: {e}")
             self.game_finished.emit()
 
     def stop_game(self):
-        """停止游戏循环。"""
+        """优雅地停止游戏循环。"""
         self.is_stopped = True
-        self.wait_condition.wakeAll()
+        self.wait_condition.wakeAll()  # 确保如果卡在输入等待，也能被唤醒并停止
 
     def submit_user_input(self, text: str):
-        """槽函数：接收来自UI的用户输入并唤醒游戏循环。"""
+        """接收来自UI的用户输入并唤醒等待的_get_user_input方法。"""
         self.mutex.lock()
         self.user_input = text
         self.wait_condition.wakeAll()
         self.mutex.unlock()
 
+    # --- 核心游戏流程 ---
+    @Slot()
     def _process_next_node(self):
         """
-        处理单个节点，然后通过事件队列调度下一个节点。
-        这个方法是游戏流程的核心驱动。
+        游戏流程的核心驱动。
+        处理单个节点，然后通过信号异步地调度下一次调用，从而避免阻塞线程。
         """
+        # 检查游戏是否应该结束
         if self.is_stopped or self.current_node_index >= len(self.node_keys):
-            if not self.is_stopped:
-                print("[Controller] 流程执行完毕。")
-            else:
-                print("[Controller] 流程被用户停止。")
+            status = "被用户停止" if self.is_stopped else "执行完毕"
+            print(f"[Controller] 流程{status}。")
             self.game_finished.emit()
             return
 
@@ -128,40 +130,37 @@ class GameController(QObject):
         node_data = self.current_workflow_data.get("nodes", {})[node_key]
         print(f"[Controller] ==> 进入节点: {node_data.get('name', '未命名')} (索引: {self.current_node_index})")
 
+        # 执行当前节点内的所有同步任务
         self._execute_node(node_data)
 
+        # 如果在节点执行期间被停止，则立即退出
         if self.is_stopped:
             print("[Controller] 流程在节点执行中被停止。")
             self.game_finished.emit()
             return
 
-        # 【修正-1】: 在这里处理循环逻辑
-        # 如果当前节点没有设置 "loop": true，才将索引指向下一个节点。
-        # 否则，索引保持不变，下次依然执行当前节点。
-        if not node_data.get("loop", False):
+        # 检查当前节点是否需要循环。如果不需要，则将索引指向下一个节点。
+        is_loop_node = node_data.get("loop", False)
+        if not is_loop_node:
             self.current_node_index += 1
+            print("[Controller] 节点执行完成，准备进入下一个节点。")
         else:
             print(f"[Controller] 节点 '{node_data.get('name', '未命名')}' 将循环执行。")
 
         self.save_game("autosave")
 
-        # 异步调度下一次执行
-        QMetaObject.invokeMethod(self, "_process_next_node", Qt.QueuedConnection)
-
-    # _game_loop 方法是多余的，可以安全删除，这里我将它注释掉以减少混淆
-    # def _game_loop(self):
-    #     ...
+        # 【关键】通过信号异步触发下一个节点的处理
+        self._process_next_node_signal.emit()
 
     def _execute_node(self, node_data: Dict[str, Any]):
         """
-        【修正-2】: 移除了内部的 while True 循环。
-        此函数现在只负责对单个节点执行一轮步骤（并行和顺序）。
+        执行单个节点内的所有步骤。此函数是同步的，执行完毕后返回。
         """
+        if self.is_stopped: return
+
         steps = node_data.get("steps", [])
         parallel_steps = [s for s in steps if s.get("parallel_execution", False)]
         sequential_steps = [s for s in steps if not s.get("parallel_execution", False)]
-
-        if self.is_stopped: return
 
         if parallel_steps:
             print(f"[Controller] -> 开始并行执行 {len(parallel_steps)} 个步骤...")
@@ -177,11 +176,12 @@ class GameController(QObject):
             self._execute_step(step)
 
     def _execute_step(self, step_data: Dict[str, Any]):
+        """执行一个单独的步骤，包括构建提示、调用AI、处理结果等。"""
         step_name = step_data.get('name', '未命名')
         print(f"[Controller] ----> 执行步骤: {step_name}...")
 
         messages, user_content_for_context = self._build_messages(step_data)
-        if messages is None:
+        if messages is None:  # 如果在等待用户输入时游戏被停止，则返回None
             return
 
         if not messages or messages[-1].get("role") != "user":
@@ -210,18 +210,20 @@ class GameController(QObject):
             self._save_context_file()
 
     def _get_user_input(self, prompt_message: str) -> Optional[str]:
+        """向UI请求输入，并使用QWaitCondition阻塞当前工作线程直到获得输入。"""
         self.mutex.lock()
         self.user_input = None
         self.input_requested.emit(prompt_message)
+        # 阻塞并等待，直到UI线程调用submit_user_input并唤醒它
         self.wait_condition.wait(self.mutex)
         result = self.user_input
         self.mutex.unlock()
         return result
 
     def _build_messages(self, step_data: Dict[str, Any]):
+        """构建发送给AI的最终消息列表。"""
         messages = []
         prompt_parts = []
-        user_input_content = ""
 
         if step_data.get("use_context"):
             messages.extend(self.context)
@@ -234,36 +236,35 @@ class GameController(QObject):
             if content:
                 prompt_parts.append(f"\n--- 参考资料: {file_to_read} ---\n{content}")
 
-        if step_data.get("use_user_context", False):
-            user_input = self._get_user_input("请输入你的行动:")
-            if self.is_stopped: return None, None
+        final_prompt_without_user_input = "\n".join(filter(None, prompt_parts)).strip()
+        user_input_content = ""
 
-            user_input_content = user_input or ""
+        if step_data.get("use_user_context", False):
+            user_input_content = self._get_user_input("请输入你的行动:")
+            if self.is_stopped: return None, None
+            user_input_content = user_input_content or ""
             prompt_parts.append(f"\n--- 玩家行动 ---\n{user_input_content}")
 
         final_prompt = "\n".join(filter(None, prompt_parts)).strip()
 
-        # 将输入上下文和最终提示分开，以便准确保存
-        user_content_for_context = final_prompt
-
         if final_prompt:
             messages.append({"role": "user", "content": final_prompt})
 
-        return messages, user_content_for_context
+        # 保存到context的内容应该是完整的用户提示
+        return messages, final_prompt
 
-    # --- 辅助方法 (保持不变) ---
-
+    # --- 辅助方法 ---
     def save_game(self, slot_name: str = "autosave"):
         if not self.current_workflow_name: return
-        save_dir = os.path.join(self.base_path, "saves")
-        os.makedirs(save_dir, exist_ok=True)
-        save_file = os.path.join(save_dir, f"{slot_name}.json")
-        save_data = {
-            "workflow_name": self.current_workflow_name,
-            "current_node_index": self.current_node_index,
-            "context": self.context
-        }
         try:
+            save_dir = os.path.join(self.base_path, "saves")
+            os.makedirs(save_dir, exist_ok=True)
+            save_file = os.path.join(save_dir, f"{slot_name}.json")
+            save_data = {
+                "workflow_name": self.current_workflow_name,
+                "current_node_index": self.current_node_index,
+                "context": self.context
+            }
             with open(save_file, 'w', encoding='utf-8') as f:
                 json.dump(save_data, f, ensure_ascii=False, indent=4)
         except Exception as e:
@@ -300,4 +301,3 @@ class GameController(QObject):
     def _save_context_file(self):
         context_path = os.path.join(self.base_path, "context.json")
         with open(context_path, 'w', encoding='utf-8') as f: json.dump(self.context, f, ensure_ascii=False, indent=4)
-
