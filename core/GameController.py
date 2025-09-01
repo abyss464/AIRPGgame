@@ -164,6 +164,8 @@ class GameController(QObject):
 
         if parallel_steps:
             print(f"[Controller] -> 开始并行执行 {len(parallel_steps)} 个步骤...")
+            # 注意：真正的并行执行需要更复杂的线程/进程管理。
+            # 这里的实现是快速连续执行，对于非阻塞IO是有效的。
             for step in parallel_steps:
                 if self.is_stopped: break
                 self._execute_step(step)
@@ -185,11 +187,6 @@ class GameController(QObject):
         if messages is None:  # 在等待用户输入时游戏被停止
             return
 
-        # 【逻辑不变但原因已变】
-        # 此检查现在能正确处理所有情况：
-        # 1. 如果有真实用户输入，user消息存在。
-        # 2. 如果是AI主动行动，会有一个占位符user消息。
-        # 3. 如果步骤是空的（没prompt，不需用户输入），user消息不存在，则跳过。
         if not any(msg['role'] == 'user' for msg in messages):
             print(f"[Controller] 步骤 '{step_name}' 被跳过：没有可执行的提示或用户交互。")
             return
@@ -210,10 +207,35 @@ class GameController(QObject):
         if step_data.get("save_to_file"):
             self._write_file(step_data["save_to_file"], ai_response)
 
-        if step_data.get("save_to_context", False) and user_input_for_context is not None:
-            self.context.append({"role": "user", "content": user_input_for_context})
-            self.context.append({"role": "assistant", "content": ai_response})
+        # ##################################################################
+        # ##############       【核心修改逻辑开始】       ##############
+        # ##################################################################
+        if step_data.get("save_to_context", False):
+            if user_input_for_context is not None:
+                # 情况 1: 存在真实的用户输入。
+                # 行为: 像之前一样，保存标准的 user/assistant 对话轮次。
+                self.context.append({"role": "user", "content": user_input_for_context})
+                self.context.append({"role": "assistant", "content": ai_response})
+                print("[Controller] [Context] 已追加新的 user/assistant 对话轮次。")
+            else:
+                # 情况 2: 不存在真实的用户输入（即使用了系统占位符）。
+                # 我们需要将此AI响应合并到上一个AI响应中，或创建一个新的AI响应。
+                if self.context and self.context[-1].get("role") == "assistant":
+                    # 子情况 2a: 上一条历史记录是AI的回复。
+                    # 行为: 将本次AI的回复追加到上一次回复的末尾。这对于AI的多步骤自我思考很有用。
+                    self.context[-1]["content"] += f"\n\n{ai_response}"
+                    print("[Controller] [Context] 已将AI响应合并到上一条助理消息中。")
+                else:
+                    # 子情况 2b: 上下文为空，或上一条不是AI的回复（例如，是一个user的回复）。
+                    # 行为: 创建一个全新的、以AI回复开始的历史记录。
+                    self.context.append({"role": "assistant", "content": ai_response})
+                    print("[Controller] [Context] 已添加一条新的、仅包含AI的对话历史。")
+
+            # 无论哪种情况，修改后都保存上下文文件
             self._save_context_file()
+        # ##################################################################
+        # ##############        【核心修改逻辑结束】        ##############
+        # ##################################################################
 
     def _get_user_input(self, prompt_message: str) -> Optional[str]:
         """向UI请求输入，并使用QWaitCondition阻塞当前工作线程直到获得输入。"""
@@ -323,3 +345,4 @@ class GameController(QObject):
     def _save_context_file(self):
         context_path = os.path.join(self.base_path, "context.json")
         with open(context_path, 'w', encoding='utf-8') as f: json.dump(self.context, f, ensure_ascii=False, indent=4)
+        print("[Controller] [文件操作] -> 已更新 context.json")
