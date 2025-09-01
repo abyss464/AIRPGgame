@@ -1,6 +1,6 @@
 # game_card.py
 import sys
-from PySide6.QtCore import Signal, QThread
+from PySide6.QtCore import Signal, QThread, Qt
 from PySide6.QtWidgets import (QWidget, QPushButton, QVBoxLayout, QLabel, QComboBox,
                                QPlainTextEdit, QLineEdit, QHBoxLayout, QApplication)
 from PySide6.QtGui import QColor, QTextCharFormat, QTextCursor
@@ -76,7 +76,10 @@ class GameCard(QWidget):
         # self.controller.log_message.connect(lambda text: self.append_log(text, "system"))
 
         # 将 GameController 的 ai_response 信号连接到 append_log 方法
-        self.controller.ai_response.connect(lambda text: self.append_log(text, "ai"))
+        self.controller.ai_response.connect(
+            lambda text: self.append_log(text, "ai"),
+            Qt.QueuedConnection
+        )
 
         # 其他信号连接保持不变
         self.controller.input_requested.connect(self.handle_input_request)
