@@ -9,7 +9,7 @@ from PySide6.QtCore import Signal, Qt
 from PySide6.QtWidgets import (
     QWidget, QPushButton, QVBoxLayout, QHBoxLayout, QLabel, QInputDialog, QMessageBox, QFormLayout, QLineEdit,
     QTextEdit, QCheckBox, QSplitter, QTreeView, QStackedWidget, QDialog,
-    QComboBox, QAbstractItemView
+    QComboBox, QAbstractItemView, QDialogButtonBox
 )
 from PySide6.QtGui import QStandardItemModel, QStandardItem, QAction
 
@@ -18,6 +18,59 @@ from PySide6.QtGui import QStandardItemModel, QStandardItem, QAction
 ITEM_TYPE_ROLE = Qt.UserRole + 1
 ITEM_ID_ROLE = Qt.UserRole + 2
 ITEM_PARENT_IDS_ROLE = Qt.UserRole + 3
+
+
+class AddPromptDialog(QDialog):
+    """
+    一个用于添加新提示词的专用对话框。
+    允许用户输入名称、选择类型、填写描述和内容。
+    """
+
+    def __init__(self, prompt_types, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("添加新提示词")
+        self.setMinimumWidth(450)
+
+        layout = QVBoxLayout(self)
+        form_layout = QFormLayout()
+
+        self.name_edit = QLineEdit()
+        self.type_combo = QComboBox()
+        self.type_combo.addItems(prompt_types)
+        self.desc_edit = QLineEdit()
+        self.content_edit = QTextEdit()
+        self.content_edit.setAcceptRichText(False)  # 通常提示词是纯文本
+
+        form_layout.addRow("名称 (唯一):", self.name_edit)
+        form_layout.addRow("类型:", self.type_combo)
+        form_layout.addRow("描述:", self.desc_edit)
+        form_layout.addRow("内容:", self.content_edit)
+
+        layout.addLayout(form_layout)
+
+        # 标准的 OK/Cancel 按钮
+        self.button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        self.button_box.accepted.connect(self.accept)
+        self.button_box.rejected.connect(self.reject)
+        layout.addWidget(self.button_box)
+
+    def accept(self):
+        # 在接受对话框前，进行基本校验
+        if not self.name_edit.text().strip():
+            QMessageBox.warning(self, "输入错误", "提示词名称不能为空。")
+            self.name_edit.setFocus()
+            return
+        # 校验通过，调用父类的accept
+        super().accept()
+
+    def get_data(self):
+        """返回用户输入的数据字典"""
+        return {
+            "name": self.name_edit.text().strip(),
+            "type": self.type_combo.currentText(),
+            "description": self.desc_edit.text(),
+            "content": self.content_edit.toPlainText()
+        }
 
 class PromptManagerDialog(QDialog):
     def __init__(self, parent=None):
@@ -31,41 +84,43 @@ class PromptManagerDialog(QDialog):
         self.del_btn = QPushButton("删除选中项")
         self.add_btn.clicked.connect(self._add_prompt)
         self.del_btn.clicked.connect(self._delete_prompt)
-        toolbar_layout.addWidget(self.add_btn);
-        toolbar_layout.addWidget(self.del_btn);
-        toolbar_layout.addStretch();
+        toolbar_layout.addWidget(self.add_btn)
+        toolbar_layout.addWidget(self.del_btn)
+        toolbar_layout.addStretch()
         main_layout.addLayout(toolbar_layout)
-        splitter = QSplitter(Qt.Horizontal);
+        splitter = QSplitter(Qt.Horizontal)
         main_layout.addWidget(splitter)
-        self.tree_view = QTreeView();
-        self.tree_view.setHeaderHidden(True);
-        self.tree_model = QStandardItemModel();
-        self.tree_view.setModel(self.tree_model);
-        self.tree_view.selectionModel().selectionChanged.connect(self._on_selection_changed);
+        self.tree_view = QTreeView()
+        self.tree_view.setHeaderHidden(True)
+        self.tree_model = QStandardItemModel()
+        self.tree_view.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.tree_view.setModel(self.tree_model)
+        self.tree_view.selectionModel().selectionChanged.connect(self._on_selection_changed)
+        self.tree_view.doubleClicked.connect(self._on_tree_item_double_clicked)
         splitter.addWidget(self.tree_view)
-        self.details_panel = QWidget();
-        self.details_layout = QFormLayout(self.details_panel);
-        self.name_edit = QLineEdit();
-        self.name_edit.setReadOnly(True);
-        self.type_combo = QComboBox();
-        self.type_combo.addItems(PROMPT_TYPES);
-        self.desc_edit = QLineEdit();
-        self.content_edit = QTextEdit();
-        self.save_btn = QPushButton("保存更改");
+        self.details_panel = QWidget()
+        self.details_layout = QFormLayout(self.details_panel)
+        self.name_edit = QLineEdit()
+        self.name_edit.setReadOnly(True)
+        self.type_combo = QComboBox()
+        self.type_combo.addItems(PROMPT_TYPES)
+        self.desc_edit = QLineEdit()
+        self.content_edit = QTextEdit()
+        self.save_btn = QPushButton("保存更改")
         self.save_btn.clicked.connect(self._save_prompt_details)
-        self.details_layout.addRow("名称 (唯一):", self.name_edit);
-        self.details_layout.addRow("类型:", self.type_combo);
-        self.details_layout.addRow("描述:", self.desc_edit);
-        self.details_layout.addRow("内容:", self.content_edit);
-        self.details_layout.addRow(self.save_btn);
-        splitter.addWidget(self.details_panel);
+        self.details_layout.addRow("名称 (唯一):", self.name_edit)
+        self.details_layout.addRow("类型:", self.type_combo)
+        self.details_layout.addRow("描述:", self.desc_edit)
+        self.details_layout.addRow("内容:", self.content_edit)
+        self.details_layout.addRow(self.save_btn)
+        splitter.addWidget(self.details_panel)
         splitter.setSizes([250, 550])
-        self._populate_tree();
+        self._populate_tree()
         self._on_selection_changed()
 
     def _populate_tree(self):
-        self.tree_model.clear();
-        root = self.tree_model.invisibleRootItem();
+        self.tree_model.clear()
+        root = self.tree_model.invisibleRootItem()
         type_items = {}
         for p_type in PROMPT_TYPES: type_item = QStandardItem(p_type.replace('_', ' ').title()); type_item.setData(
             "category", ITEM_TYPE_ROLE); type_item.setEditable(False); root.appendRow(type_item); type_items[
@@ -95,10 +150,52 @@ class PromptManagerDialog(QDialog):
                 -1)
 
     def _add_prompt(self):
-        name, ok = QInputDialog.getText(self, "添加新提示词", "请输入唯一的提示词名称:");
-        if ok and name: (self.manager.get_prompt(name) and QMessageBox.warning(self, "错误", "该名称已存在。")) or (
-                    self.manager.add_prompt(name, "goal",
-                                            "内容...") and self.manager.save_prompts() and self._populate_tree())
+        """
+        使用自定义的 AddPromptDialog 来添加新提示词，提供更好的用户体验。
+        """
+        dialog = AddPromptDialog(PROMPT_TYPES, self)
+
+        # 以模态方式显示对话框，并检查返回值
+        if dialog.exec_() == QDialog.Accepted:
+            data = dialog.get_data()
+            name = data["name"]
+
+            # 唯一性校验
+            if self.manager.get_prompt(name):
+                QMessageBox.warning(self, "错误", f"名称 '{name}' 已存在，请使用其他名称。")
+                return  # 提前返回，不进行后续操作
+
+            # 添加到管理器
+            self.manager.add_prompt(
+                name,
+                data["type"],
+                data["content"],
+                data["description"]
+            )
+
+            # 保存并刷新UI
+            if self.manager.save_prompts():
+                # 重新填充树
+                self._populate_tree()
+                # 自动选中新添加的项，提升用户体验
+                self._select_item_by_name(name)
+                QMessageBox.information(self, "成功", f"提示词 '{name}' 已成功添加。")
+
+    # 在 _populate_tree 方法之后，_add_prompt 方法之前添加
+    def _select_item_by_name(self, name):
+        """在树中查找并选中指定名称的项"""
+        # 使用 MatchRecursive 在整个模型中递归查找
+        items = self.tree_model.findItems(name, Qt.MatchExactly | Qt.MatchRecursive)
+        for item in items:
+            # 确保找到的是一个 prompt 项，而不是同名的类别项
+            if item.data(ITEM_TYPE_ROLE) == "prompt":
+                index = self.tree_model.indexFromItem(item)
+                # 设置为当前选中项
+                self.tree_view.setCurrentIndex(index)
+                return # 找到后即可退出
+
+    def _on_tree_item_double_clicked(self, index):
+        self.tree_view.selectionModel().clearSelection()
 
     def _delete_prompt(self):
         prompt_name = self._get_selected_prompt_name()
