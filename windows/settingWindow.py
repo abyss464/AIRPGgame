@@ -71,6 +71,7 @@ class CustomTitleBar(QWidget):
 
 
 class SettingWindow(QWidget):
+    DEFAULT_SUFFIX = " (默认)"
     def __init__(self, parent=None):
         super().__init__(parent)
         self.manager = ModelConfigManager()
@@ -126,6 +127,14 @@ class SettingWindow(QWidget):
         self.add_button.clicked.connect(self.prepare_add_provider)
         self.remove_button = QPushButton("➖ 删除")
         self.remove_button.clicked.connect(self.remove_provider)
+
+        self.set_default_button = QPushButton("⭐ 设为默认")
+        self.set_default_button.clicked.connect(self.set_as_default_provider)
+
+        left_button_layout.addWidget(self.add_button)
+        left_button_layout.addWidget(self.remove_button)
+        left_button_layout.addWidget(self.set_default_button)  # Add to layout
+
         left_button_layout.addWidget(self.add_button)
         left_button_layout.addWidget(self.remove_button)
         left_panel.addLayout(left_button_layout)
@@ -241,6 +250,24 @@ class SettingWindow(QWidget):
             /* ... (scrollbar styles are the same) ... */
         """)
 
+    def set_as_default_provider(self):
+        selected_item = self.provider_list.currentItem()
+        if not selected_item:
+            QMessageBox.warning(self, "操作失败", "请先选择一个要设为默认的服务商。")
+            return
+
+        provider_name = selected_item.text().replace(self.DEFAULT_SUFFIX, "")
+
+        if self.manager.set_default_provider(provider_name):
+            QMessageBox.information(self, "成功", f"已将 '{provider_name}' 设置为默认服务商。")
+            self.load_providers_list()  # Reload list to show the (默认) suffix
+            # Re-select the item
+            items = self.provider_list.findItems(provider_name + self.DEFAULT_SUFFIX, Qt.MatchExactly)
+            if items:
+                self.provider_list.setCurrentItem(items[0])
+        else:
+            QMessageBox.critical(self, "错误", "设置默认服务商失败。")
+
     # <-- 7. New slot method to handle model selection -->
     def on_model_selected(self, model_name: str):
         """When a model is selected from the combobox, update the default model field."""
@@ -257,14 +284,28 @@ class SettingWindow(QWidget):
             self.toggle_api_key_button.setText("显示")
 
     def load_providers_list(self):
+        self.provider_list.blockSignals(True)
         self.provider_list.clear()
+
         providers = self.manager.list_providers()
+        default_provider = self.manager.get_default_provider_name()
+
         if providers:
-            self.provider_list.addItems(providers)
+            for provider_name in providers:
+                display_text = provider_name
+                if provider_name == default_provider:
+                    display_text += self.DEFAULT_SUFFIX
+                self.provider_list.addItem(QListWidgetItem(display_text))
+
             self.provider_list.setCurrentRow(0)
         else:
             self.clear_details()
             self.set_details_enabled(False)
+
+        self.provider_list.blockSignals(False)
+        # Manually trigger the selection change after reloading
+        if self.provider_list.currentItem():
+            self.on_provider_selected(self.provider_list.currentItem(), None)
 
     def on_provider_selected(self, current_item: QListWidgetItem, previous_item: QListWidgetItem):
         if not current_item:
@@ -273,37 +314,30 @@ class SettingWindow(QWidget):
             return
 
         self.set_details_enabled(True)
-        provider_name = current_item.text()
+        # Remove the suffix to get the real name for the manager
+        provider_name = current_item.text().replace(self.DEFAULT_SUFFIX, "")
         provider_data = self.manager.get_provider(provider_name)
 
         if provider_data:
+            # ... (rest of the method is the same)
             self.name_input.setText(provider_data.get('name', ''))
             self.api_key_input.setText(provider_data.get('api_key', ''))
             self.base_url_input.setText(provider_data.get('base_url', ''))
             self.default_model_input.setText(provider_data.get('default_model', ''))
             self.provider_type_input.setText(provider_data.get('provider_type', 'openai'))
-
             other_params = provider_data.get('other_params', {})
             self.other_params_input.setText(json.dumps(other_params, indent=4) if other_params else '')
-
-            # <-- 8. Update logic to populate QComboBox and set current item -->
-            # Block signals to prevent on_model_selected from firing during setup
             self.available_models_combobox.blockSignals(True)
             self.available_models_combobox.clear()
-
             models = provider_data.get('available_models', [])
             if models:
                 self.available_models_combobox.addItems(models)
                 default_model = provider_data.get('default_model', '')
                 if default_model in models:
                     self.available_models_combobox.setCurrentText(default_model)
-                elif models:  # if default model not in list, select the first one
+                elif models:
                     self.available_models_combobox.setCurrentIndex(0)
-
-            # Unblock signals now that setup is complete
             self.available_models_combobox.blockSignals(False)
-            # <-- End of modification -->
-
             self.toggle_api_key_button.setChecked(False)
             self.toggle_api_key_visibility(False)
 
@@ -318,7 +352,10 @@ class SettingWindow(QWidget):
         if not selected_item:
             QMessageBox.warning(self, "操作失败", "请先在左侧选择一个要删除的服务商。")
             return
-        provider_name = selected_item.text()
+
+        # Remove the suffix to get the real name for the manager
+        provider_name = selected_item.text().replace(self.DEFAULT_SUFFIX, "")
+
         reply = QMessageBox.question(self, "确认删除", f"您确定要删除服务商 '{provider_name}' 吗？",
                                      QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
         if reply == QMessageBox.Yes:
@@ -428,23 +465,23 @@ class SettingWindow(QWidget):
         self.toggle_api_key_visibility(False)
 
     def set_details_enabled(self, enabled: bool):
-        # <-- 10. Update widget list to toggle -->
         widgets_to_toggle = [
             self.name_input, self.api_key_input, self.base_url_input,
             self.default_model_input, self.provider_type_input,
             self.other_params_input, self.save_button, self.fetch_button,
             self.remove_button, self.toggle_api_key_button,
-            self.available_models_combobox
+            self.available_models_combobox,
+            self.set_default_button  # Add the new button here
         ]
         for w in widgets_to_toggle:
             w.setEnabled(enabled)
 
-        if not enabled or self.provider_list.currentItem() is None:
+        # Special logic to disable delete/set_default if nothing is selected
+        item_selected = self.provider_list.currentItem() is not None
+        self.remove_button.setEnabled(enabled and item_selected)
+        self.set_default_button.setEnabled(enabled and item_selected)
+
+        # When preparing to add a new provider, disable these two buttons
+        if enabled and not item_selected:
             self.remove_button.setEnabled(False)
-
-
-if __name__ == '__main__':
-    app = QApplication(sys.argv)
-    window = SettingWindow()
-    window.show()
-    sys.exit(app.exec())
+            self.set_default_button.setEnabled(False)

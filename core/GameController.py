@@ -36,6 +36,8 @@ class GameController(QObject):
         self.node_keys: List[str] = []
         self.current_node_index: int = 0
 
+        self.pending_user_input: Optional[str] = None
+
         # --- 线程同步机制 ---
         self.mutex = QMutex()
         self.wait_condition = QWaitCondition()
@@ -120,7 +122,7 @@ class GameController(QObject):
         # 检查游戏是否应该结束
         if self.is_stopped or self.current_node_index >= len(self.node_keys):
             status = "被用户停止" if self.is_stopped else "执行完毕"
-            print(f"[Controller] 流程{status}。")
+            print(f"[Controller] 流程 {status}。")
             self.game_finished.emit()
             return
 
@@ -137,16 +139,32 @@ class GameController(QObject):
             self.game_finished.emit()
             return
 
-        # 检查当前节点是否需要循环。如果不需要，则将索引指向下一个节点。
-        is_loop_node = node_data.get("loop", False)
-        if not is_loop_node:
+        # ======== 新增/修改的逻辑：处理节点循环 ========
+        loop_until_condition = node_data.get("loop_until_condition_met", False)
+        loop_condition = node_data.get("loop_condition")
+
+        if loop_until_condition and loop_condition:
+            # 情况1: 条件循环
+            print(f"[Controller] 正在检查节点 '{node_data.get('name', '未命名')}' 的循环条件: '{loop_condition}'")
+            condition_met = self._check_loop_condition(loop_condition)
+            if condition_met:
+                self.current_node_index += 1
+                print(f"[Controller] ✅ 条件满足，节点循环结束，准备进入下一节点。")
+            else:
+                # 索引保持不变，以重复当前节点
+                print(f"[Controller] ❌ 条件未满足，将重复执行当前节点。")
+        elif node_data.get("loop", False):
+            # 情况2: 无限循环 (旧逻辑)
+            # 索引保持不变
+            print(f"[Controller] 节点 '{node_data.get('name', '未命名')}' 将无限循环执行。")
+        else:
+            # 情况3: 非循环节点
             self.current_node_index += 1
             print("[Controller] 节点执行完成，准备进入下一个节点。")
-        else:
-            print(f"[Controller] 节点 '{node_data.get('name', '未命名')}' 将循环执行。")
+
+        # ===============================================
 
         self.save_game("autosave")
-
         self._process_next_node_signal.emit()
 
     def _execute_node(self, node_data: Dict[str, Any]):
@@ -173,7 +191,117 @@ class GameController(QObject):
             self._execute_step(step)
 
     def _execute_step(self, step_data: Dict[str, Any]):
-        """执行一个单独的步骤，包括构建提示、调用AI、处理结果等。"""
+        """
+        执行一个单独的步骤。
+        【V4.0 逻辑】为条件循环实现一个优化的交互模型。
+        1. 首先，执行一次步骤的初始逻辑（通常是AI提出问题）。
+        2. 然后，进入一个循环，在该循环中：
+           a. 获取用户输入。
+           b. **在调用AI之前**，立即检查循环条件。
+           c. 如果条件满足，则立即结束该步骤，进入下一节点。
+           d. 如果条件不满足，才继续调用AI生成响应，然后开始下一次循环。
+        """
+        should_loop = step_data.get("loop_until_condition_met", False)
+        loop_condition = step_data.get("loop_condition")
+
+        # --- 情况1: 普通步骤 (非条件循环) ---
+        if not (should_loop and loop_condition):
+            self._execute_single_step_logic(step_data)
+            return
+
+        # --- 情况2: 条件循环步骤 ---
+        step_name = step_data.get('name', '未命名')
+
+        # 1. 初始执行 ("Prompt Run")
+        # 这一步通常用于AI提出需要用户解决的问题或任务。
+        print(f"[Controller] ----> 执行循环步骤 '{step_name}' 的初始提示...")
+        self._execute_single_step_logic(step_data)
+        if self.is_stopped: return
+
+        # 2. 进入交互式循环 ("Interactive Loop")
+        iteration = 2
+        while not self.is_stopped:
+            print(f"[Controller] ----> 等待用户输入以满足条件 '{loop_condition}' (第 {iteration} 次尝试)...")
+
+            # 2a. 获取用户输入
+            user_input = self._get_user_input("请输入你的行动:")
+            if self.is_stopped or user_input is None:
+                return  # 如果游戏停止或输入为空，则退出
+
+            # 如果需要，将用户输入添加到上下文中，以便条件检查器能够看到它
+            save_context_flag = step_data.get("save_to_context", False)
+            if save_context_flag:
+                self.context.append({"role": "user", "content": user_input})
+                print("[Controller] [Context] 已追加用户输入，准备进行条件检查。")
+
+            # 2b. 在调用AI之前检查条件
+            if self._check_loop_condition(loop_condition):
+                print(f"[Controller] ✅ 条件被用户输入满足！跳过AI生成，结束步骤。")
+
+                # --- 新增逻辑 ---
+                print(f"[Controller] [State] 将未使用的用户输入暂存，以供下一步骤使用。")
+                self.pending_user_input = user_input  # 将未使用的输入暂存起来
+                # --- 结束新增 ---
+
+                if save_context_flag:
+                    self._save_context_file()  # 保存包含最终用户输入的上下文
+                return  # 成功退出步骤
+
+            print(f"[Controller] ❌ 条件未被满足，继续执行AI生成...")
+
+            # 2c. 如果条件不满足，则调用AI进行响应
+            # 我们需要手动构建消息，因为我们已经处理了用户输入部分
+            messages = []
+            system_prompt_parts = []
+
+            # 构建系统提示 (复用自 _build_messages 的逻辑)
+            if step_data.get("prompt"):
+                system_prompt_parts.append(step_data["prompt"])
+            if step_data.get("read_from_file"):
+                content = self._read_file(step_data["read_from_file"])
+                if content:
+                    system_prompt_parts.append(f"\n--- 参考资料: {step_data['read_from_file']} ---\n{content}")
+
+            final_system_prompt = "\n".join(filter(None, system_prompt_parts)).strip()
+            if final_system_prompt:
+                messages.append({"role": "system", "content": final_system_prompt})
+
+            # 加载历史对话上下文 (现在包含了我们刚刚添加的用户输入)
+            if step_data.get("use_context"):
+                messages.extend(self.context)
+
+            # 调用AI
+            ai_response = self.model_linker.create_completion(
+                messages=messages,
+                provider_name=step_data.get("provider"),
+                model=step_data.get("model")
+            )
+
+            # 2d. 处理AI的响应
+            if not ai_response:
+                print(f"[Controller] 步骤 '{step_name}' 在循环中未能从AI获取响应。")
+                iteration += 1
+                continue  # 继续下一次循环，再次请求用户输入
+
+            if step_data.get("output_to_console", True):
+                self.ai_response.emit(ai_response)
+
+            if step_data.get("save_to_file"):
+                self._write_file(step_data["save_to_file"], ai_response)
+
+            # 将AI的响应添加到上下文中
+            if save_context_flag:
+                self.context.append({"role": "assistant", "content": ai_response})
+                print("[Controller] [Context] 已追加AI响应。")
+                self._save_context_file()  # 在一轮完整的交互后保存上下文
+
+            iteration += 1
+
+    def _execute_single_step_logic(self, step_data: Dict[str, Any]):
+        """
+        【新增的辅助方法】包含执行单个步骤的核心逻辑。
+        从 _execute_step 中提取出来，以便于在循环中被重复调用。
+        """
         step_name = step_data.get('name', '未命名')
         print(f"[Controller] ----> 执行步骤: {step_name}...")
 
@@ -204,26 +332,50 @@ class GameController(QObject):
 
         if step_data.get("save_to_context", False):
             if user_input_for_context is not None:
-                # 情况 1: 存在真实的用户输入。
-                # 行为: 像之前一样，保存标准的 user/assistant 对话轮次。
                 self.context.append({"role": "user", "content": user_input_for_context})
                 self.context.append({"role": "assistant", "content": ai_response})
                 print("[Controller] [Context] 已追加新的 user/assistant 对话轮次。")
             else:
-                # 情况 2: 不存在真实的用户输入（即使用了系统占位符）。
-                # 我们需要将此AI响应合并到上一个AI响应中，或创建一个新的AI响应。
                 if self.context and self.context[-1].get("role") == "assistant":
-                    # 子情况 2a: 上一条历史记录是AI的回复。
-                    # 行为: 将本次AI的回复追加到上一次回复的末尾。这对于AI的多步骤自我思考很有用。
                     self.context[-1]["content"] += f"\n\n{ai_response}"
                     print("[Controller] [Context] 已将AI响应合并到上一条助理消息中。")
                 else:
-                    # 子情况 2b: 上下文为空，或上一条不是AI的回复（例如，是一个user的回复）。
-                    # 行为: 创建一个全新的、以AI回复开始的历史记录。
                     self.context.append({"role": "assistant", "content": ai_response})
                     print("[Controller] [Context] 已添加一条新的、仅包含AI的对话历史。")
-
             self._save_context_file()
+
+    # --- 辅助方法 ---
+
+    def _check_loop_condition(self, condition: str) -> bool:
+        """
+        【全新辅助方法】
+        调用AI模型来判断给定的循环条件是否在当前上下文中得到满足。
+        """
+        if not self.context:
+            print("[Controller] [LoopCheck] 上下文为空，无法判断条件，默认返回 False。")
+            return False
+
+        # 构造一个专门用于判断的、临时的消息列表
+        prompt = f"请问以上对话中：“{condition}”这个条件是否已经完成？你只需要回答 True 或者 False，禁止回答其他任何内容。"
+
+        # 使用当前上下文，并附加我们的判断问题
+        messages_for_check = self.context + [{"role": "user", "content": prompt}]
+
+        print(f"[Controller] [LoopCheck] 向AI发送条件检查请求...")
+
+        # 为了节约成本和提高速度，可以使用一个比较轻量级的模型进行判断
+        # 如果未指定，则使用默认模型
+        response = self.model_linker.create_completion(messages=messages_for_check, provider_name=self.modelmanager.get_default_provider_name(), model=self.modelmanager.get_default_provider_model())
+
+        if not response:
+            print("[Controller] [LoopCheck] 未能从AI获取条件检查的响应，默认返回 False。")
+            return False
+
+        # 对AI的回答进行严格解析
+        cleaned_response = response.strip().lower()
+        print(f"[Controller] [LoopCheck] AI对条件的判断结果为: '{cleaned_response}'")
+
+        return cleaned_response == 'true'
 
     def _get_user_input(self, prompt_message: str) -> Optional[str]:
         """向UI请求输入，并使用QWaitCondition阻塞当前工作线程直到获得输入。"""
@@ -238,15 +390,16 @@ class GameController(QObject):
 
     def _build_messages(self, step_data: Dict[str, Any]) -> (Optional[List[Dict[str, str]]], Optional[str]):
         messages = []
-        system_prompt_parts = []
         user_input_for_context: Optional[str] = None
         has_actionable_prompt = False
 
-        # 1. 构建系统提示
+        # 1. 构建系统提示 (逻辑不变)
         prompt_content = step_data.get("prompt", "")
         if prompt_content:
             has_actionable_prompt = True
-            system_prompt_parts.append(prompt_content)
+            system_prompt_parts = [prompt_content]
+        else:
+            system_prompt_parts = []
 
         file_to_read = step_data.get("read_from_file")
         if file_to_read:
@@ -259,33 +412,45 @@ class GameController(QObject):
         if final_system_prompt:
             messages.append({"role": "system", "content": final_system_prompt})
 
-        # 2. 加载历史对话上下文
+        # 2. 加载历史对话上下文 (逻辑不变)
         if step_data.get("use_context"):
             messages.extend(self.context)
 
-        # 3. 获取用户输入 或 使用占位符
-        if step_data.get("use_user_context", False):
-            # 情况 A: 需要真实的用户输入
+        # 3. 处理用户输入部分 (全新逻辑)
+        user_message_content: Optional[str] = None
+
+        if self.pending_user_input is not None:
+            # --- 最高优先级：使用暂存的输入 ---
+            print("[Controller] [State] 检测到并使用上一步暂存的用户输入，将覆盖本步骤的输入设置。")
+            user_message_content = self.pending_user_input
+            self.pending_user_input = None  # 使用后立即清空，确保只用一次
+
+        elif step_data.get("use_user_context", False):
+            # --- 第二优先级：按配置请求用户输入 ---
             user_input_content = self._get_user_input("请输入你的行动:")
             if self.is_stopped:
                 return None, None
-
-            if user_input_content is not None:
-                user_input_for_context = user_input_content
-                messages.append({"role": "user", "content": user_input_content})
+            user_message_content = user_input_content
 
         elif has_actionable_prompt:
-            # 【全新逻辑】
-            # 情况 B: 不需要用户输入，但有系统提示，说明AI应主动行动。
-            # 我们使用一个占位符来触发AI的响应。
-            # 这个占位符可以从JSON配置，否则使用默认值。
-            placeholder = step_data.get("placeholder_prompt", "继续。")
-            messages.append({"role": "user", "content": placeholder})
-            # 关键：此时 user_input_for_context 仍然是 None，所以这个占位符不会被存入历史。
+            # --- 最低优先级：使用占位符 ---
+            user_message_content = step_data.get("placeholder_prompt", "继续。")
+
+        # 将最终确定的用户消息添加到消息列表和上下文中
+        if user_message_content is not None:
+            # 如果是占位符，它不应被记为用户历史输入。只有真实输入（包括暂存的）才应记录。
+            # (占位符触发的 else 分支不会进入这里，因为 user_input_for_context 默认为None)
+            if not step_data.get("use_user_context", False) and self.pending_user_input is None:
+                # 这是由占位符触发的情况，user_input_for_context 保持为 None
+                pass
+            else:
+                # 这是由真实用户输入或暂存输入触发的情况
+                user_input_for_context = user_message_content
+
+            messages.append({"role": "user", "content": user_message_content})
 
         return messages, user_input_for_context
 
-    # --- 辅助方法 ---
     def save_game(self, slot_name: str = "autosave"):
         if not self.current_workflow_name: return
         try:
