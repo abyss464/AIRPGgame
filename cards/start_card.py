@@ -29,11 +29,13 @@ class DarkFramelessWindow(QWidget):
         # 1. 设置窗口属性：无边框和透明背景
         #    - Qt.FramelessWindowHint: 移除窗口的边框和标题栏。
         #    - Qt.WA_TranslucentBackground: 允许背景透明，这是实现圆角的关键。
-        self.setWindowFlags(Qt.FramelessWindowHint)
-        self.setAttribute(Qt.WA_TranslucentBackground)
+        # self.setWindowFlags(Qt.FramelessWindowHint)
+        # self.setAttribute(Qt.WA_TranslucentBackground)
+
+        self.setObjectName("StartCard")
 
         # 设置窗口标题（在任务栏中可能显示）和初始大小
-        self.setWindowTitle("游戏启动器")
+        # self.setWindowTitle("游戏启动器")
 
         # 2. 创建UI组件
         self.setup_ui()
@@ -70,37 +72,33 @@ class DarkFramelessWindow(QWidget):
 
     def apply_stylesheet(self):
         """应用QSS样式"""
-        # 使用多行字符串定义QSS样式
-        # 类似于Web开发中的CSS
         qss = """
-            /* QWidget#main_widget 是为了确保样式只应用于这个窗口，而不是所有QWidget */
-            /* 如果这个窗口是主窗口，也可以直接用 QWidget */
-            QWidget {
+            /* 使用 ID 选择器 #StartCard 来精确应用样式 */
+            #StartCard {
                 background-color: #2c3e50; /* 深蓝灰色背景 */
-                border-radius: 15px;      /* 圆角半径 */
+                border-radius: 15px;      /* 圆角半径 (建议改小一点, e.g., 15px) */
                 color: white;             /* 默认字体颜色 */
                 font-family: "Microsoft YaHei", "Segoe UI", Arial, sans-serif; /* 字体 */
             }
 
+            /* QPushButton 的样式保持不变，它会正确继承和应用 */
             QPushButton {
-                background-color: #34495e; /* 按钮背景色，比主背景稍亮 */
-                color: #ecf0f1;           /* 按钮文字颜色 */
-                border: 1px solid #2980b9;/* 边框颜色 */
-                border-radius: 8px;       /* 按钮圆角 */
-                padding: 10px;            /* 内边距 */
-                font-size: 16px;          /* 字体大小 */
-                font-weight: bold;        /* 字体加粗 */
+                background-color: #34495e;
+                color: #ecf0f1;
+                border: 1px solid #2980b9;
+                border-radius: 8px;
+                padding: 10px;
+                font-size: 16px;
+                font-weight: bold;
             }
 
-            /* 鼠标悬停在按钮上时的样式 */
             QPushButton:hover {
-                background-color: #4a6278; /* 悬停时背景变亮 */
+                background-color: #4a6278;
                 border: 1px solid #3498db;
             }
 
-            /* 鼠标按下按钮时的样式 */
             QPushButton:pressed {
-                background-color: #2980b9; /* 按下时背景变为边框色 */
+                background-color: #2980b9;
             }
         """
         self.setStyleSheet(qss)

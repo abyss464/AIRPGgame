@@ -1,12 +1,10 @@
 # GameController.py
 import json
 import os
-import time
 from typing import List, Dict, Any, Optional
 
-from PySide6.QtCore import QObject, Signal, QMutex, QWaitCondition, QMetaObject, Qt, Slot
+from PySide6.QtCore import QObject, Signal, QMutex, QWaitCondition, Slot
 
-# 假设这些类存在于您的项目结构中
 from core.ModelLinker import ModelLinker
 from manager.model_config_manager import ModelConfigManager
 
@@ -149,7 +147,6 @@ class GameController(QObject):
 
         self.save_game("autosave")
 
-        # 【关键】通过信号异步触发下一个节点的处理
         self._process_next_node_signal.emit()
 
     def _execute_node(self, node_data: Dict[str, Any]):
@@ -164,8 +161,6 @@ class GameController(QObject):
 
         if parallel_steps:
             print(f"[Controller] -> 开始并行执行 {len(parallel_steps)} 个步骤...")
-            # 注意：真正的并行执行需要更复杂的线程/进程管理。
-            # 这里的实现是快速连续执行，对于非阻塞IO是有效的。
             for step in parallel_steps:
                 if self.is_stopped: break
                 self._execute_step(step)
@@ -207,9 +202,6 @@ class GameController(QObject):
         if step_data.get("save_to_file"):
             self._write_file(step_data["save_to_file"], ai_response)
 
-        # ##################################################################
-        # ##############       【核心修改逻辑开始】       ##############
-        # ##################################################################
         if step_data.get("save_to_context", False):
             if user_input_for_context is not None:
                 # 情况 1: 存在真实的用户输入。
@@ -231,11 +223,7 @@ class GameController(QObject):
                     self.context.append({"role": "assistant", "content": ai_response})
                     print("[Controller] [Context] 已添加一条新的、仅包含AI的对话历史。")
 
-            # 无论哪种情况，修改后都保存上下文文件
             self._save_context_file()
-        # ##################################################################
-        # ##############        【核心修改逻辑结束】        ##############
-        # ##################################################################
 
     def _get_user_input(self, prompt_message: str) -> Optional[str]:
         """向UI请求输入，并使用QWaitCondition阻塞当前工作线程直到获得输入。"""

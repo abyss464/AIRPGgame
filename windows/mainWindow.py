@@ -6,9 +6,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QSize, Signal, QObject
 from PySide6.QtGui import QIcon, QFont
 
-# 导入设置窗口类
 import windows.settingWindow as settingWindow
-
 
 
 class MainWindow(QMainWindow):
@@ -21,6 +19,12 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("RPG")
         self.setGeometry(100, 100, 1200, 800)
         self.settings_window = None
+
+        # --- 新增：状态变量 ---
+        # 用于跟踪左侧面板是否已经最大化
+        self.is_left_panel_expanded = False
+        # 用于存储分裂器在收起前的状态
+        self.splitter_state = None
 
         self.init_ui()
         self.apply_styles()
@@ -37,12 +41,27 @@ class MainWindow(QMainWindow):
         left_layout.setContentsMargins(10, 10, 10, 10)
         left_layout.setSpacing(10)
 
+        # --- 新增：用于放置展开按钮的顶部栏 ---
+        top_bar_layout = QHBoxLayout()
+        top_bar_layout.setContentsMargins(0, 0, 0, 0)
+        self.expand_button = QPushButton("↗")
+        self.expand_button.setObjectName("ExpandButton")
+        self.expand_button.setFixedSize(30, 30)
+        self.expand_button.setToolTip("展开侧边栏")
+
+        # 添加一个伸缩项将按钮推到右侧
+        top_bar_layout.addStretch(1)
+        top_bar_layout.addWidget(self.expand_button)
+
+        # 将顶部栏添加到左侧面板的布局中
+        left_layout.addLayout(top_bar_layout)
+        # --- 新增结束 ---
+
         self.card_container = QWidget()
-        # 为这个容器创建一个垂直布局
         self.card_layout = QVBoxLayout(self.card_container)
         self.card_layout.setContentsMargins(0, 0, 0, 0)
-        self.card_layout.setSpacing(10)  # 卡片之间的垂直间距
-        self.card_layout.setAlignment(Qt.AlignTop)  # 确保卡片从顶部开始排列
+        self.card_layout.setSpacing(10)
+        self.card_layout.setAlignment(Qt.AlignTop)
 
         left_layout.addWidget(self.card_container)
 
@@ -60,19 +79,22 @@ class MainWindow(QMainWindow):
         font = QFont("Consolas", 11)
         self.output_box.setFont(font)
 
-        splitter = QSplitter(Qt.Horizontal)
-        splitter.addWidget(left_panel)
-        splitter.addWidget(self.output_box)
-        splitter.setSizes([int(self.width() * 3 / 8), int(self.width() * 5 / 8)])
-        splitter.setStretchFactor(0, 3)
-        splitter.setStretchFactor(1, 5)
-        splitter.handle(1).setDisabled(True)
+        # 将 splitter 提升为实例变量 self.splitter
+        self.splitter = QSplitter(Qt.Horizontal)
+        self.splitter.addWidget(left_panel)
+        self.splitter.addWidget(self.output_box)
+        self.splitter.setSizes([int(self.width() * 3 / 8), int(self.width() * 5 / 8)])
+        self.splitter.setStretchFactor(0, 3)
+        self.splitter.setStretchFactor(1, 5)
+        self.splitter.handle(1).setDisabled(True)
 
         main_layout = QHBoxLayout(central_widget)
         main_layout.setContentsMargins(0, 0, 0, 0)
-        main_layout.addWidget(splitter)
+        main_layout.addWidget(self.splitter)  # 使用 self.splitter
 
+        # 连接信号
         self.settings_button.clicked.connect(self.open_settings_window)
+        self.expand_button.clicked.connect(self.toggle_left_panel_expansion)
 
     def apply_styles(self):
         """应用QSS样式表美化界面。"""
@@ -120,9 +142,43 @@ class MainWindow(QMainWindow):
             }
             #SettingsButton:hover { background-color: #4f5666; }
             #SettingsButton:pressed { background-color: #5a6275; }
+
+            /* --- 新增：展开/收起按钮的样式 --- */
+            #ExpandButton {
+                background-color: transparent;
+                color: #abb2bf;
+                border: none;
+                border-radius: 4px; /* 轻微圆角 */
+                font-size: 20px;
+                font-weight: bold;
+            }
+            #ExpandButton:hover { background-color: #4f5666; }
+            #ExpandButton:pressed { background-color: #5a6275; }
+
         """)
 
-    # --- 公共函数/槽函数 ---
+    def toggle_left_panel_expansion(self):
+        """
+        切换左侧面板的展开和收起状态。
+        """
+        if self.is_left_panel_expanded:
+            # --- 当前是展开状态，需要收起 ---
+            # 1. 恢复右侧输出框的可见性
+            self.output_box.show()
+            # 2. 恢复分裂器的尺寸
+            if self.splitter_state:
+                self.splitter.setSizes(self.splitter_state)
+            # 3. 更改按钮图标和提示文本
+            self.expand_button.setText("↗")
+            self.expand_button.setToolTip("展开侧边栏")
+            # 4. 更新状态
+            self.is_left_panel_expanded = False
+        else:
+            self.splitter_state = self.splitter.sizes()
+            self.output_box.hide()
+            self.expand_button.setText("↙")
+            self.expand_button.setToolTip("收起侧边栏")
+            self.is_left_panel_expanded = True
 
     def add_card(self, card: QWidget):
         """
@@ -150,7 +206,41 @@ class MainWindow(QMainWindow):
 
     def open_settings_window(self):
         """打开设置窗口。"""
-        if self.settings_window is None:
-            self.settings_window = settingWindow.SettingWindow(self)
-        self.settings_window.show()
-        self.settings_window.activateWindow()
+        # 为了演示，如果 settingWindow 不存在，则不做任何事
+        try:
+            if self.settings_window is None:
+                self.settings_window = settingWindow.SettingWindow(self)
+            self.settings_window.show()
+            self.settings_window.activateWindow()
+        except (NameError, AttributeError):
+            print("settingWindow 模块未导入或不存在，无法打开设置窗口。")
+            self.append_output("错误：无法打开设置窗口。")
+
+
+if __name__ == '__main__':
+    app = QApplication(sys.argv)
+    window = MainWindow()
+
+    # 添加一个示例卡片，以便观察布局
+    from PySide6.QtWidgets import QLabel
+
+
+    # 模拟一个卡片
+    class InfoCard(QWidget):
+        def __init__(self, title, parent=None):
+            super().__init__(parent)
+            self.setObjectName("InfoCard")
+            layout = QVBoxLayout(self)
+            layout.addWidget(QLabel(f"这是一个标题为 '{title}' 的卡片"))
+            layout.addWidget(QLabel("一些内容..."))
+            layout.addWidget(QLabel("更多内容..."))
+            self.setMinimumHeight(100)  # 给卡片一个最小高度
+
+
+    window.add_card(InfoCard("角色A"))
+    window.add_card(InfoCard("角色B"))
+    window.append_output("程序启动成功。")
+    window.append_output("点击左上角的 '↗' 按钮可以展开/收起侧边栏。")
+
+    window.show()
+    sys.exit(app.exec())
