@@ -189,7 +189,6 @@ class JsonWorkflowManager:
 
         step_id = self._generate_id()
 
-        # 默认模板中已移除 loop 字段
         new_step = {
             "step_id": step_id,
             "name": "新AI对话步骤",
@@ -200,7 +199,9 @@ class JsonWorkflowManager:
             "model": "default",
             "read_from_file": None,
             "save_to_file": None,
-            "output_to_console": False
+            "output_to_console": False,
+            "parallel_execution": True,
+            "save_to_context": True
         }
         new_step.update(step_details)
 

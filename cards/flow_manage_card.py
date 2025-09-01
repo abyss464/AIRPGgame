@@ -249,29 +249,23 @@ class HierarchicalFlowManagerUI(QWidget):
         self._populate_tree()
         self._on_selection_changed()
 
-    # --- 修改点 2: 添加打开全局提示词管理器的方法 ---
     def _open_global_prompt_manager(self):
         """打开全局提示词管理对话框"""
         dialog = PromptManagerDialog(self)
         dialog.exec()
 
     def _handle_tree_double_click(self, index):
-        """
-        处理树视图中的双击事件。
-        BUG FIX 2: 当一个项目被双击时，清除当前的选择。
-        """
         if index.isValid():
             self.tree_view.selectionModel().clearSelection()
 
-    # --- 其他代码与之前相同 ---
     def _setup_details_widgets(self):
-        self.empty_widget = QLabel("← 请在左侧选择一个项目进行查看或编辑");
+        self.empty_widget = QLabel("← 请在左侧选择一个项目进行查看或编辑")
         self.empty_widget.setAlignment(Qt.AlignCenter);
         self.stacked_widget.addWidget(self.empty_widget)
-        self.wf_details_widget = QWidget();
-        wf_layout = QFormLayout(self.wf_details_widget);
-        self.wf_name_edit = QLineEdit();
-        self.wf_desc_edit = QTextEdit();
+        self.wf_details_widget = QWidget()
+        wf_layout = QFormLayout(self.wf_details_widget)
+        self.wf_name_edit = QLineEdit()
+        self.wf_desc_edit = QTextEdit()
         wf_save_btn = QPushButton("保存更改");
         wf_layout.addRow("名称:", self.wf_name_edit);
         wf_layout.addRow("描述:", self.wf_desc_edit);
@@ -301,43 +295,42 @@ class HierarchicalFlowManagerUI(QWidget):
         self.step_provider_combo = QComboBox()
         self.step_model_combo = QComboBox()
         self.step_provider_combo.currentTextChanged.connect(self._update_step_model_combo)
-        self.step_read_file_edit = QLineEdit();
-        self.step_save_file_edit = QLineEdit();
-        self.step_use_context_check = QCheckBox();
-        self.step_output_console_check = QCheckBox();
+        self.step_read_file_edit = QLineEdit()
+        self.step_save_file_edit = QLineEdit()
+        self.step_use_context_check = QCheckBox()
+        self.step_output_console_check = QCheckBox()
+        self.step_parallel_check = QCheckBox()
+        self.step_save_context_check = QCheckBox()
         step_save_btn = QPushButton("保存更改")
-        step_layout.addRow("名称:", self.step_name_edit);
-        step_layout.addRow(prompt_header_layout);
-        step_layout.addRow(self.step_prompt_edit);
+        step_layout.addRow("名称:", self.step_name_edit)
+        step_layout.addRow(prompt_header_layout)
+        step_layout.addRow(self.step_prompt_edit)
         step_layout.addRow("服务商:", self.step_provider_combo)
         step_layout.addRow("模型:", self.step_model_combo)
-        step_layout.addRow("从文件读入:", self.step_read_file_edit);
-        step_layout.addRow("存入指定文件:", self.step_save_file_edit);
-        step_layout.addRow("使用上下文:", self.step_use_context_check);
-        step_layout.addRow("输出至控制台:", self.step_output_console_check);
+        step_layout.addRow("从文件读入:", self.step_read_file_edit)
+        step_layout.addRow("存入指定文件:", self.step_save_file_edit)
+        step_layout.addRow("使用上下文:", self.step_use_context_check)
+        step_layout.addRow("保存输出到上下文:", self.step_save_context_check)
+        step_layout.addRow("并行执行:", self.step_parallel_check)
+        step_layout.addRow("输出至控制台:", self.step_output_console_check)
         step_layout.addRow(step_save_btn)
-        self.stacked_widget.addWidget(self.step_details_widget);
+        self.stacked_widget.addWidget(self.step_details_widget)
         step_save_btn.clicked.connect(partial(self._save_details, "step"))
 
     def _update_step_provider_combo(self):
         """用 model_manager 中的数据填充服务商下拉框"""
-        # 保存当前选择，以便刷新后恢复
         current_provider = self.step_provider_combo.currentText()
 
-        # 阻止信号触发，避免在填充时重复更新模型列表
         self.step_provider_combo.blockSignals(True)
         self.step_provider_combo.clear()
 
         providers = self.model_manager.list_providers()
         if providers:
             self.step_provider_combo.addItems(providers)
-            # 尝试恢复之前的选择
             if current_provider in providers:
                 self.step_provider_combo.setCurrentText(current_provider)
 
-        # 重新启用信号
         self.step_provider_combo.blockSignals(False)
-        # 手动触发一次，确保模型列表与当前服务商同步
         self._update_step_model_combo(self.step_provider_combo.currentText())
 
     def _update_step_model_combo(self, provider_name: str):
@@ -360,28 +353,28 @@ class HierarchicalFlowManagerUI(QWidget):
     def _populate_tree(self):
         _, selected_id, _ = self._get_selected_item_info()
         self.tree_model.clear();
-        root = self.tree_model.invisibleRootItem();
+        root = self.tree_model.invisibleRootItem()
         item_to_reselect = None
         for wf_id, wf_data in self.manager.data.items():
-            wf_item = QStandardItem(wf_data.get("name", "未命名流程"));
-            wf_item.setData("workflow", ITEM_TYPE_ROLE);
-            wf_item.setData(wf_id, ITEM_ID_ROLE);
+            wf_item = QStandardItem(wf_data.get("name", "未命名流程"))
+            wf_item.setData("workflow", ITEM_TYPE_ROLE)
+            wf_item.setData(wf_id, ITEM_ID_ROLE)
             root.appendRow(wf_item)
             if wf_id == selected_id: item_to_reselect = wf_item
             for node_id, node_data in wf_data.get("nodes", {}).items():
-                node_name = node_data.get("name", "未命名节点");
-                is_loop = " (循环)" if node_data.get("loop", False) else "";
-                node_item = QStandardItem(f"{node_name}{is_loop}");
-                node_item.setData("node", ITEM_TYPE_ROLE);
-                node_item.setData(node_id, ITEM_ID_ROLE);
-                node_item.setData({"wf_id": wf_id}, ITEM_PARENT_IDS_ROLE);
+                node_name = node_data.get("name", "未命名节点")
+                is_loop = " (循环)" if node_data.get("loop", False) else ""
+                node_item = QStandardItem(f"{node_name}{is_loop}")
+                node_item.setData("node", ITEM_TYPE_ROLE)
+                node_item.setData(node_id, ITEM_ID_ROLE)
+                node_item.setData({"wf_id": wf_id}, ITEM_PARENT_IDS_ROLE)
                 wf_item.appendRow(node_item)
                 if node_id == selected_id: item_to_reselect = node_item
                 for step_data in node_data.get("steps", []):
-                    step_id = step_data.get("step_id");
-                    step_item = QStandardItem(step_data.get("name", "未命名步骤"));
-                    step_item.setData("step", ITEM_TYPE_ROLE);
-                    step_item.setData(step_id, ITEM_ID_ROLE);
+                    step_id = step_data.get("step_id")
+                    step_item = QStandardItem(step_data.get("name", "未命名步骤"))
+                    step_item.setData("step", ITEM_TYPE_ROLE)
+                    step_item.setData(step_id, ITEM_ID_ROLE)
                     step_item.setData({"wf_id": wf_id, "node_id": node_id}, ITEM_PARENT_IDS_ROLE);
                     node_item.appendRow(step_item)
                     if step_id == selected_id: item_to_reselect = step_item
@@ -452,6 +445,8 @@ class HierarchicalFlowManagerUI(QWidget):
             self.step_save_file_edit.setText(data.get("save_to_file") or "")
             self.step_use_context_check.setChecked(data.get("use_context", False))
             self.step_output_console_check.setChecked(data.get("output_to_console", False))
+            self.step_parallel_check.setChecked(data.get("parallel_execution", True))
+            self.step_save_context_check.setChecked(data.get("save_to_context", True))
 
             # 2. 动态填充并设置服务商(Provider)下拉框
             # 首先，用所有可用的服务商填充下拉框
@@ -521,7 +516,9 @@ class HierarchicalFlowManagerUI(QWidget):
                                         "read_from_file": self.step_read_file_edit.text() or None,
                                         "save_to_file": self.step_save_file_edit.text() or None,
                                         "use_context": self.step_use_context_check.isChecked(),
-                                        "output_to_console": self.step_output_console_check.isChecked()})
+                                        "output_to_console": self.step_output_console_check.isChecked(),
+                                        "parallel_execution": self.step_parallel_check.isChecked(),
+                                        "save_to_context": self.step_save_context_check.isChecked()}),
             self.send_log.emit(f"更新了 {item_type}: {item_id}");
             self._populate_tree()
 
