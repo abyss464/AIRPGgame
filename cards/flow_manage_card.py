@@ -204,6 +204,9 @@ class HierarchicalFlowManagerUI(QWidget):
 
         # --- 修改点 1: 将全局工具栏直接添加到主组件布局中 ---
         global_toolbar_layout = QHBoxLayout()
+        self.return_btn = QPushButton("🔙 返回主菜单")
+        self.return_btn.clicked.connect(self.return_to_menu_requested.emit)
+        global_toolbar_layout.addWidget(self.return_btn)
         self.manage_prompts_btn = QPushButton("📚 管理提示词库")
         self.manage_prompts_btn.clicked.connect(self._open_global_prompt_manager)
         global_toolbar_layout.addWidget(self.manage_prompts_btn)
@@ -225,15 +228,15 @@ class HierarchicalFlowManagerUI(QWidget):
         splitter = QSplitter(Qt.Horizontal)
         main_layout.addWidget(splitter)
 
-        # 左侧: 树视图
         self.tree_view = QTreeView()
         self.tree_view.setHeaderHidden(True)
+        self.tree_view.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.tree_view.doubleClicked.connect(self._handle_tree_double_click)
         self.tree_model = QStandardItemModel()
         self.tree_view.setModel(self.tree_model)
         self.tree_view.selectionModel().selectionChanged.connect(self._on_selection_changed)
         splitter.addWidget(self.tree_view)
 
-        # 右侧: 详情面板
         self.details_panel = QWidget()
         self.details_layout = QVBoxLayout(self.details_panel)
         self.details_layout.setAlignment(Qt.AlignTop)
@@ -251,6 +254,14 @@ class HierarchicalFlowManagerUI(QWidget):
         """打开全局提示词管理对话框"""
         dialog = PromptManagerDialog(self)
         dialog.exec()
+
+    def _handle_tree_double_click(self, index):
+        """
+        处理树视图中的双击事件。
+        BUG FIX 2: 当一个项目被双击时，清除当前的选择。
+        """
+        if index.isValid():
+            self.tree_view.selectionModel().clearSelection()
 
     # --- 其他代码与之前相同 ---
     def _setup_details_widgets(self):
