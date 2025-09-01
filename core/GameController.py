@@ -180,12 +180,18 @@ class GameController(QObject):
         step_name = step_data.get('name', '未命名')
         print(f"[Controller] ----> 执行步骤: {step_name}...")
 
-        messages, user_content_for_context = self._build_messages(step_data)
-        if messages is None:  # 如果在等待用户输入时游戏被停止，则返回None
+        messages, user_input_for_context = self._build_messages(step_data)
+
+        if messages is None:  # 在等待用户输入时游戏被停止
             return
 
-        if not messages or messages[-1].get("role") != "user":
-            print(f"[Controller] 步骤 '{step_name}' 被跳过：没有有效的用户提示可发送给AI。")
+        # 【逻辑不变但原因已变】
+        # 此检查现在能正确处理所有情况：
+        # 1. 如果有真实用户输入，user消息存在。
+        # 2. 如果是AI主动行动，会有一个占位符user消息。
+        # 3. 如果步骤是空的（没prompt，不需用户输入），user消息不存在，则跳过。
+        if not any(msg['role'] == 'user' for msg in messages):
+            print(f"[Controller] 步骤 '{step_name}' 被跳过：没有可执行的提示或用户交互。")
             return
 
         ai_response = self.model_linker.create_completion(
@@ -195,7 +201,7 @@ class GameController(QObject):
         )
 
         if not ai_response:
-            print(f"[Controller] 步骤 '{step_name}' 未能从AI获取响应。请检查API密钥和网络连接。")
+            print(f"[Controller] 步骤 '{step_name}' 未能从AI获取响应。")
             return
 
         if step_data.get("output_to_console", True):
@@ -204,8 +210,8 @@ class GameController(QObject):
         if step_data.get("save_to_file"):
             self._write_file(step_data["save_to_file"], ai_response)
 
-        if step_data.get("save_to_context", False):
-            self.context.append({"role": "user", "content": user_content_for_context})
+        if step_data.get("save_to_context", False) and user_input_for_context is not None:
+            self.context.append({"role": "user", "content": user_input_for_context})
             self.context.append({"role": "assistant", "content": ai_response})
             self._save_context_file()
 
@@ -220,38 +226,54 @@ class GameController(QObject):
         self.mutex.unlock()
         return result
 
-    def _build_messages(self, step_data: Dict[str, Any]):
-        """构建发送给AI的最终消息列表。"""
+    def _build_messages(self, step_data: Dict[str, Any]) -> (Optional[List[Dict[str, str]]], Optional[str]):
         messages = []
-        prompt_parts = []
+        system_prompt_parts = []
+        user_input_for_context: Optional[str] = None
+        has_actionable_prompt = False
 
-        if step_data.get("use_context"):
-            messages.extend(self.context)
-
-        prompt_parts.append(step_data.get("prompt", ""))
+        # 1. 构建系统提示
+        prompt_content = step_data.get("prompt", "")
+        if prompt_content:
+            has_actionable_prompt = True
+            system_prompt_parts.append(prompt_content)
 
         file_to_read = step_data.get("read_from_file")
         if file_to_read:
             content = self._read_file(file_to_read)
             if content:
-                prompt_parts.append(f"\n--- 参考资料: {file_to_read} ---\n{content}")
+                has_actionable_prompt = True
+                system_prompt_parts.append(f"\n--- 参考资料: {file_to_read} ---\n{content}")
 
-        final_prompt_without_user_input = "\n".join(filter(None, prompt_parts)).strip()
-        user_input_content = ""
+        final_system_prompt = "\n".join(filter(None, system_prompt_parts)).strip()
+        if final_system_prompt:
+            messages.append({"role": "system", "content": final_system_prompt})
 
+        # 2. 加载历史对话上下文
+        if step_data.get("use_context"):
+            messages.extend(self.context)
+
+        # 3. 获取用户输入 或 使用占位符
         if step_data.get("use_user_context", False):
+            # 情况 A: 需要真实的用户输入
             user_input_content = self._get_user_input("请输入你的行动:")
-            if self.is_stopped: return None, None
-            user_input_content = user_input_content or ""
-            prompt_parts.append(f"\n--- 玩家行动 ---\n{user_input_content}")
+            if self.is_stopped:
+                return None, None
 
-        final_prompt = "\n".join(filter(None, prompt_parts)).strip()
+            if user_input_content is not None:
+                user_input_for_context = user_input_content
+                messages.append({"role": "user", "content": user_input_content})
 
-        if final_prompt:
-            messages.append({"role": "user", "content": final_prompt})
+        elif has_actionable_prompt:
+            # 【全新逻辑】
+            # 情况 B: 不需要用户输入，但有系统提示，说明AI应主动行动。
+            # 我们使用一个占位符来触发AI的响应。
+            # 这个占位符可以从JSON配置，否则使用默认值。
+            placeholder = step_data.get("placeholder_prompt", "继续。")
+            messages.append({"role": "user", "content": placeholder})
+            # 关键：此时 user_input_for_context 仍然是 None，所以这个占位符不会被存入历史。
 
-        # 保存到context的内容应该是完整的用户提示
-        return messages, final_prompt
+        return messages, user_input_for_context
 
     # --- 辅助方法 ---
     def save_game(self, slot_name: str = "autosave"):
