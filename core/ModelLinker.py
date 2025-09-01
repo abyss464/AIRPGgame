@@ -99,6 +99,7 @@ class ModelLinker:
 
             # 提取并返回结果
             content = response.choices[0].message.content
+            print(content)
             return content.strip() if content else ""
 
         except APIConnectionError as e:

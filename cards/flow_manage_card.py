@@ -260,36 +260,36 @@ class HierarchicalFlowManagerUI(QWidget):
 
     def _setup_details_widgets(self):
         self.empty_widget = QLabel("← 请在左侧选择一个项目进行查看或编辑")
-        self.empty_widget.setAlignment(Qt.AlignCenter);
+        self.empty_widget.setAlignment(Qt.AlignCenter)
         self.stacked_widget.addWidget(self.empty_widget)
         self.wf_details_widget = QWidget()
         wf_layout = QFormLayout(self.wf_details_widget)
         self.wf_name_edit = QLineEdit()
         self.wf_desc_edit = QTextEdit()
-        wf_save_btn = QPushButton("保存更改");
-        wf_layout.addRow("名称:", self.wf_name_edit);
-        wf_layout.addRow("描述:", self.wf_desc_edit);
-        wf_layout.addRow(wf_save_btn);
-        self.stacked_widget.addWidget(self.wf_details_widget);
+        wf_save_btn = QPushButton("保存更改")
+        wf_layout.addRow("名称:", self.wf_name_edit)
+        wf_layout.addRow("描述:", self.wf_desc_edit)
+        wf_layout.addRow(wf_save_btn)
+        self.stacked_widget.addWidget(self.wf_details_widget)
         wf_save_btn.clicked.connect(partial(self._save_details, "workflow"))
-        self.node_details_widget = QWidget();
-        node_layout = QFormLayout(self.node_details_widget);
-        self.node_name_edit = QLineEdit();
-        self.node_loop_check = QCheckBox("循环执行此节点内的所有步骤");
-        node_save_btn = QPushButton("保存更改");
-        node_layout.addRow("名称:", self.node_name_edit);
-        node_layout.addRow(self.node_loop_check);
-        node_layout.addRow(node_save_btn);
-        self.stacked_widget.addWidget(self.node_details_widget);
+        self.node_details_widget = QWidget()
+        node_layout = QFormLayout(self.node_details_widget)
+        self.node_name_edit = QLineEdit()
+        self.node_loop_check = QCheckBox("循环执行此节点内的所有步骤")
+        node_save_btn = QPushButton("保存更改")
+        node_layout.addRow("名称:", self.node_name_edit)
+        node_layout.addRow(self.node_loop_check)
+        node_layout.addRow(node_save_btn)
+        self.stacked_widget.addWidget(self.node_details_widget)
         node_save_btn.clicked.connect(partial(self._save_details, "node"))
-        self.step_details_widget = QWidget();
-        step_layout = QFormLayout(self.step_details_widget);
+        self.step_details_widget = QWidget()
+        step_layout = QFormLayout(self.step_details_widget)
         self.step_name_edit = QLineEdit()
-        prompt_header_layout = QHBoxLayout();
-        prompt_header_layout.addWidget(QLabel("提示词(Prompt):"));
-        prompt_header_layout.addStretch();
-        self.build_prompt_btn = QPushButton("🔨 构建提示词");
-        self.build_prompt_btn.clicked.connect(self._open_prompt_builder);
+        prompt_header_layout = QHBoxLayout()
+        prompt_header_layout.addWidget(QLabel("提示词(Prompt):"))
+        prompt_header_layout.addStretch()
+        self.build_prompt_btn = QPushButton("🔨 构建提示词")
+        self.build_prompt_btn.clicked.connect(self._open_prompt_builder)
         prompt_header_layout.addWidget(self.build_prompt_btn)
         self.step_prompt_edit = QTextEdit()
         self.step_provider_combo = QComboBox()
@@ -297,6 +297,7 @@ class HierarchicalFlowManagerUI(QWidget):
         self.step_provider_combo.currentTextChanged.connect(self._update_step_model_combo)
         self.step_read_file_edit = QLineEdit()
         self.step_save_file_edit = QLineEdit()
+        self.step_use_user_context_check = QCheckBox()
         self.step_use_context_check = QCheckBox()
         self.step_output_console_check = QCheckBox()
         self.step_parallel_check = QCheckBox()
@@ -309,6 +310,7 @@ class HierarchicalFlowManagerUI(QWidget):
         step_layout.addRow("模型:", self.step_model_combo)
         step_layout.addRow("从文件读入:", self.step_read_file_edit)
         step_layout.addRow("存入指定文件:", self.step_save_file_edit)
+        step_layout.addRow("使用用户输入:", self.step_use_user_context_check)
         step_layout.addRow("使用上下文:", self.step_use_context_check)
         step_layout.addRow("保存输出到上下文:", self.step_save_context_check)
         step_layout.addRow("并行执行:", self.step_parallel_check)
@@ -443,6 +445,7 @@ class HierarchicalFlowManagerUI(QWidget):
             self.step_prompt_edit.setText(data.get("prompt", ""))
             self.step_read_file_edit.setText(data.get("read_from_file") or "")
             self.step_save_file_edit.setText(data.get("save_to_file") or "")
+            self.step_use_user_context_check.setChecked(data.get("use_user_context", True))
             self.step_use_context_check.setChecked(data.get("use_context", False))
             self.step_output_console_check.setChecked(data.get("output_to_console", False))
             self.step_parallel_check.setChecked(data.get("parallel_execution", True))
@@ -515,6 +518,7 @@ class HierarchicalFlowManagerUI(QWidget):
                                         "model": self.step_model_combo.currentText(),        # 从ComboBox获取
                                         "read_from_file": self.step_read_file_edit.text() or None,
                                         "save_to_file": self.step_save_file_edit.text() or None,
+                                        "use_user_context": self.step_use_user_context_check.isChecked(),
                                         "use_context": self.step_use_context_check.isChecked(),
                                         "output_to_console": self.step_output_console_check.isChecked(),
                                         "parallel_execution": self.step_parallel_check.isChecked(),

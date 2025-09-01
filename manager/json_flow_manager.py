@@ -201,7 +201,8 @@ class JsonWorkflowManager:
             "save_to_file": None,
             "output_to_console": False,
             "parallel_execution": True,
-            "save_to_context": True
+            "save_to_context": True,
+            "use_user_context": False
         }
         new_step.update(step_details)
 

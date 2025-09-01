@@ -134,13 +134,12 @@ class MainWindow(QMainWindow):
         self.card_layout.addWidget(card)
 
     def clear_cards(self):
-        """
-        清空左侧面板中的所有卡片。
-        """
+        """从布局中移除所有控件，但不删除它们。"""
         while self.card_layout.count():
             child = self.card_layout.takeAt(0)
-            if child.widget():
-                child.widget().deleteLater()
+            widget = child.widget()
+            if widget is not None:
+                widget.setParent(None)
 
     def append_output(self, text: str):
         self.output_box.append(text)
