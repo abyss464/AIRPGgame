@@ -118,7 +118,8 @@ class GameCard(QWidget):
             self.request_start_game.emit(workflow_name)
         else:
             self.request_load_game.emit(workflow_name, kwargs.get("slot", "autosave"))
-
+        self._last_game_type = 'new' if is_new_game else 'load'  # 对信号连接的标记
+  
     def start_new_game(self):
         workflow_name = self.combo_workflows.currentText()
         if workflow_name and "未找到" not in workflow_name:
@@ -145,11 +146,10 @@ class GameCard(QWidget):
         # 断开所有连接，防止旧信号影响新会话
         if self.controller:
             try:
-                self.request_start_game.disconnect(self.controller.run)
-            except (TypeError, RuntimeError):
-                pass
-            try:
-                self.request_load_game.disconnect(self.controller.load_and_run)
+                if getattr(self, '_last_game_type', None) == 'new':
+                    self.request_start_game.disconnect(self.controller.run)
+                elif getattr(self, '_last_game_type', None) == 'load':
+                    self.request_load_game.disconnect(self.controller.load_and_run)
             except (TypeError, RuntimeError):
                 pass
             self.controller.deleteLater()
@@ -163,6 +163,7 @@ class GameCard(QWidget):
         temp_controller = GameController();
         self.populate_workflows(temp_controller.workflows);
         del temp_controller
+        print("清理完成")
 
     def handle_input_request(self, prompt: str):
         self.input_widget.setEnabled(True);
