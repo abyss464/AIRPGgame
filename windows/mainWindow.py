@@ -17,7 +17,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("RPG")
-        self.setGeometry(100, 100, 1200, 800)
+        self.setGeometry(100, 100, 1600, 900)
         self.settings_window = None
 
         # --- 新增：状态变量 ---
@@ -32,6 +32,7 @@ class MainWindow(QMainWindow):
     def init_ui(self):
         """初始化用户界面布局和控件。"""
         central_widget = QWidget()
+        central_widget.setObjectName("CentralWidget")
         self.setCentralWidget(central_widget)
 
         left_panel = QWidget()
@@ -52,20 +53,29 @@ class MainWindow(QMainWindow):
         # 添加一个伸缩项将按钮推到右侧
         top_bar_layout.addStretch(1)
         top_bar_layout.addWidget(self.expand_button)
-
-        # 将顶部栏添加到左侧面板的布局中
         left_layout.addLayout(top_bar_layout)
-        # --- 新增结束 ---
+
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setObjectName("CardScrollArea")
+        # 移除滚动区域的边框，让它看起来更无缝
+        scroll_area.setFrameShape(QScrollArea.NoFrame)
 
         self.card_container = QWidget()
+        # 让卡片容器的背景透明，这样左侧面板的圆角才能透出来
+        self.card_container.setStyleSheet("background-color: transparent;")
         self.card_layout = QVBoxLayout(self.card_container)
-        self.card_layout.setContentsMargins(0, 0, 0, 0)
+        self.card_layout.setContentsMargins(0, 10, 0, 10)  # 给卡片上下留点空间
         self.card_layout.setSpacing(10)
-        self.card_layout.setAlignment(Qt.AlignTop)
+        self.card_layout.setAlignment(Qt.AlignTop)  # 让卡片从顶部开始排列
 
-        left_layout.addWidget(self.card_container)
+        # 将 card_container 设置为 scroll_area 的内容控件
+        scroll_area.setWidget(self.card_container)
 
-        left_layout.addStretch(1)
+        # 将 scroll_area 添加到左侧布局中，而不是 card_container
+        left_layout.addWidget(scroll_area)
+
+        # left_layout.addStretch(1)
 
         self.settings_button = QPushButton("⚙")
         self.settings_button.setObjectName("SettingsButton")
@@ -100,9 +110,9 @@ class MainWindow(QMainWindow):
         """应用QSS样式表美化界面。"""
         self.setStyleSheet("""
             /* 主窗口和中央控件背景色 */
-            QMainWindow, QWidget {
+            QMainWindow, QWidget#CentralWidget  {
                 background-color: #282c34;
-                color: #abb2bf; /* 为所有子控件设置一个默认前景色 */
+                color: #abb2bf;
             }
 
             /* 左侧面板的圆角矩形样式 */
@@ -111,11 +121,29 @@ class MainWindow(QMainWindow):
                 border-radius: 15px;
             }
 
-            /* --- 新增：卡片的通用样式 --- */
-            #InfoCard {
+            /* --- 新增：卡片滚动区域的样式 --- */
+            #CardScrollArea {
+                border: none;
+                background-color: #30353f; /* 比左侧面板稍微亮一点的颜色 */
+                border-radius: 10px;
+                padding: 5px;
+            }
+
+            /* --- 卡片的通用样式 --- */
+            QWidget#InfoCard {
                 background-color: #2c313a;
                 border-radius: 8px;
                 border: 1px solid #21252b;
+                padding: 8px;
+                margin: 2px;
+            }
+            
+            .InfoCard {
+                background-color: #2c313a;
+                border-radius: 8px;
+                border: 1px solid #21252b;
+                padding: 8px;
+                margin: 2px;
             }
 
             /* 右侧代码输出框样式 */
@@ -127,6 +155,26 @@ class MainWindow(QMainWindow):
                 font-family: Consolas, 'Courier New', monospace;
                 font-size: 14px;
             }
+
+            /* --- 新增：美化滚动条 --- */
+            QScrollBar:vertical {
+                border: none;
+                background: #3a3f4b; /* 滚动条背景色 */
+                width: 10px;
+                margin: 0px 0px 0px 0px;
+            }
+            QScrollBar::handle:vertical {
+                background: #5a6275; /* 滑块颜色 */
+                min-height: 20px;
+                border-radius: 5px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background: #6b7389; /* 悬停时滑块颜色 */
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                height: 0px; /* 隐藏上下箭头 */
+            }
+
 
             QSplitter::handle:horizontal {
                 background-color: #282c34;
@@ -143,12 +191,11 @@ class MainWindow(QMainWindow):
             #SettingsButton:hover { background-color: #4f5666; }
             #SettingsButton:pressed { background-color: #5a6275; }
 
-            /* --- 新增：展开/收起按钮的样式 --- */
             #ExpandButton {
                 background-color: transparent;
                 color: #abb2bf;
                 border: none;
-                border-radius: 4px; /* 轻微圆角 */
+                border-radius: 4px;
                 font-size: 20px;
                 font-weight: bold;
             }
@@ -181,12 +228,10 @@ class MainWindow(QMainWindow):
             self.is_left_panel_expanded = True
 
     def add_card(self, card: QWidget):
-        """
-        向左侧面板添加一个卡片控件。
-
-        Args:
-            card (QWidget): 一个预先创建好的卡片实例 (例如 CharacterInfoCard)。
-        """
+        # --- 修改 4: 插入卡片到伸缩项之前 ---
+        # self.card_layout.addWidget(card) # 旧代码
+        # count()-1 是因为最后一个item是addStretch
+        card.setObjectName("InfoCard")
         self.card_layout.addWidget(card)
 
     def clear_cards(self):
@@ -216,31 +261,3 @@ class MainWindow(QMainWindow):
             print("settingWindow 模块未导入或不存在，无法打开设置窗口。")
             self.append_output("错误：无法打开设置窗口。")
 
-
-if __name__ == '__main__':
-    app = QApplication(sys.argv)
-    window = MainWindow()
-
-    # 添加一个示例卡片，以便观察布局
-    from PySide6.QtWidgets import QLabel
-
-
-    # 模拟一个卡片
-    class InfoCard(QWidget):
-        def __init__(self, title, parent=None):
-            super().__init__(parent)
-            self.setObjectName("InfoCard")
-            layout = QVBoxLayout(self)
-            layout.addWidget(QLabel(f"这是一个标题为 '{title}' 的卡片"))
-            layout.addWidget(QLabel("一些内容..."))
-            layout.addWidget(QLabel("更多内容..."))
-            self.setMinimumHeight(100)  # 给卡片一个最小高度
-
-
-    window.add_card(InfoCard("角色A"))
-    window.add_card(InfoCard("角色B"))
-    window.append_output("程序启动成功。")
-    window.append_output("点击左上角的 '↗' 按钮可以展开/收起侧边栏。")
-
-    window.show()
-    sys.exit(app.exec())
