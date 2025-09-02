@@ -192,92 +192,90 @@ class GameController(QObject):
 
     def _execute_step(self, step_data: Dict[str, Any]):
         """
-        【V4.1 逻辑】执行一个单独的步骤，遵循“输出 -> 输入”模型。
-        1. AI首先根据上下文和提示生成内容并输出。
-        2. 然后，根据步骤配置（loop 或 use_user_context），决定是否等待用户输入。
-        3. 用户的输入将被保存到上下文中，供下一个步骤无缝使用。
+        【V4.2 逻辑】执行一个单独的步骤，支持完整的重试循环。
+        1. 整个步骤（AI生成 -> 用户输入 -> 条件判断）被一个主循环包裹。
+        2. 在每次循环迭代中，AI都会根据【最新的】上下文（包含上一次失败的尝试）生成新内容。
+        3. 然后，如果需要，等待用户输入。
+        4. 最后，检查循环条件。如果满足，则跳出循环，步骤结束；如果不满足，则将本次失败的尝试记录到上下文中，并开始下一次迭代。
         """
         step_name = step_data.get('name', '未命名')
-        print(f"[Controller] ----> 执行步骤: {step_name}...")
+        is_loop_step = step_data.get("loop_until_condition_met", False)
+        save_context_flag = step_data.get("save_to_context", True)  # 默认保存上下文
 
-        # --- 1. AI生成与输出阶段 ---
-        messages, is_new_turn = self._build_messages(step_data)
+        iteration = 1
+        while not self.is_stopped:
+            print(f"[Controller] ----> 执行步骤: {step_name} (尝试第 {iteration} 次)...")
 
-        # 如果没有任何可执行内容（例如，只有一个空的system prompt），则跳过AI
-        if len(messages) <= 1 and not any(m['role'] == 'user' for m in messages):
-            print(f"[Controller] 步骤 '{step_name}' 无可执行内容，跳过AI生成。")
+            # --- 1. AI生成与输出阶段 (每次迭代都执行) ---
+            messages, _ = self._build_messages(step_data)
+
             ai_response = None
-        else:
-            ai_response = self.model_linker.create_completion(
-                messages=messages,
-                provider_name=step_data.get("provider"),
-                model=step_data.get("model")
-            )
+            if len(messages) <= 1 and not any(m['role'] == 'user' for m in messages):
+                print(f"[Controller] 步骤 '{step_name}' 无可执行内容，跳过AI生成。")
+            else:
+                ai_response = self.model_linker.create_completion(
+                    messages=messages,
+                    provider_name=step_data.get("provider"),
+                    model=step_data.get("model")
+                )
 
-        save_context_flag = step_data.get("save_to_context", False)
+            if ai_response:
+                if step_data.get("output_to_console", True):
+                    self.ai_response.emit(ai_response)
+                if step_data.get("save_to_file"):
+                    self._write_file(step_data["save_to_file"], ai_response)
 
-        if ai_response:
-            if step_data.get("output_to_console", True):
-                self.ai_response.emit(ai_response)
-            if step_data.get("save_to_file"):
-                self._write_file(step_data["save_to_file"], ai_response)
+            # --- 2. 用户输入处理阶段 (每次迭代都执行) ---
+            user_input: Optional[str] = None
+            user_input_required = is_loop_step or step_data.get("use_user_context", False)
 
-            # 保存AI响应到上下文（合并或新增）
-            if save_context_flag:
-                if is_new_turn:
-                    # 如果是真实用户输入开启的新回合，则添加新的assistant消息
-                    self.context.append({"role": "assistant", "content": ai_response})
-                    print("[Controller] [Context] 已追加新的 assistant 对话。")
-                else:
-                    # 否则，与上一条assistant消息合并
-                    if self.context and self.context[-1].get("role") == "assistant":
-                        self.context[-1]["content"] += f"\n\n{ai_response}"
-                        print("[Controller] [Context] 已将AI响应合并到上一条助理消息中。")
-                    else:
-                        # 如果是第一条消息，则直接添加
-                        self.context.append({"role": "assistant", "content": ai_response})
-                        print("[Controller] [Context] 已添加首条 assistant 对话。")
+            if user_input_required:
+                prompt_text = step_data.get("user_prompt", "请输入你的行动:")
+                user_input = self._get_user_input(prompt_text)
+                if self.is_stopped: return
 
-        # --- 2. 用户输入处理阶段 ---
-        user_input_for_next_step: Optional[str] = None
+            # --- 3. 组装本次迭代的新消息，并进行评估 ---
+            new_messages_this_iteration = []
+            if ai_response:
+                new_messages_this_iteration.append({"role": "assistant", "content": ai_response})
+            if user_input is not None:
+                new_messages_this_iteration.append({"role": "user", "content": user_input})
 
-        # 情况A: 条件循环
-        if step_data.get("loop_until_condition_met", False):
+            # 如果不是循环步骤，执行一次就成功并退出
+            if not is_loop_step:
+                if save_context_flag and new_messages_this_iteration:
+                    self.context.extend(new_messages_this_iteration)
+                    print("[Controller] [Context] 已追加标准步骤的对话。")
+                break  # 退出 while 循环
+
+            # 如果是循环步骤，检查条件
             loop_condition = step_data.get("loop_condition")
             if not loop_condition:
                 print(f"[Controller] 错误: 循环步骤 '{step_name}' 缺少 'loop_condition'。")
-                return
+                break  # 避免死循环
 
-            iteration = 1
-            while not self.is_stopped:
-                print(f"[Controller] ----> 等待用户输入以满足条件 '{loop_condition}' (第 {iteration} 次尝试)...")
-                user_input = self._get_user_input("请输入你的行动:")
-                if self.is_stopped or user_input is None: return
+            # 使用包含本次迭代所有新消息的完整上下文进行检查
+            context_for_check = self.context + new_messages_this_iteration
+            if self._check_loop_condition(loop_condition, context_for_check):
+                print(f"[Controller] ✅ 条件 '{loop_condition}' 已满足！结束循环。")
+                if save_context_flag and new_messages_this_iteration:
+                    self.context.extend(new_messages_this_iteration)
+                    print("[Controller] [Context] 已追加成功的循环迭代对话。")
+                break  # 条件满足，成功退出 while 循环
+            else:
+                print(f"[Controller] ❌ 条件未被满足，准备重试。")
+                if save_context_flag and new_messages_this_iteration:
+                    self.context.extend(new_messages_this_iteration)
+                    print("[Controller] [Context] 已追加失败的尝试，以便AI在下次迭代中参考。")
 
-                # 临时将输入放入一个字典中，以便条件检查器工作
-                temp_context_for_check = self.context + [{"role": "user", "content": user_input}]
-                if self._check_loop_condition(loop_condition, temp_context_for_check):
-                    print(f"[Controller] ✅ 条件被用户输入满足！结束循环。")
-                    user_input_for_next_step = user_input
-                    break  # 成功，退出while循环
-                else:
-                    print(f"[Controller] ❌ 条件未被满足，请重试。")
-                    # 可选：可以输出一个固定的重试提示
-                    self.ai_response.emit("这似乎不对，再试试其他方法。")
                 iteration += 1
+                # 不使用 break，将自动进入下一次 while 循环
 
-        # 情况B: 普通的用户输入请求
-        elif step_data.get("use_user_context", False):
-            user_input_for_next_step = self._get_user_input("请输入你的行动:")
-            if self.is_stopped: return
-
-        # --- 3. 保存用户输入并结束步骤 ---
-        if user_input_for_next_step is not None and save_context_flag:
-            self.context.append({"role": "user", "content": user_input_for_next_step})
-            print("[Controller] [Context] 已追加用户输入，将用于下一步骤。")
-
+        # --- 4. 步骤执行完毕后，统一保存上下文文件 ---
         if save_context_flag:
             self._save_context_file()
+
+        print(f"[Controller] <---- 步骤 '{step_name}' 执行完毕。")
 
     # --- 辅助方法 ---
 
