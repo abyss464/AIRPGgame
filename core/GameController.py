@@ -281,26 +281,35 @@ class GameController(QObject):
 
     # --- 辅助方法 ---
 
-    def _check_loop_condition(self, condition: str) -> bool:
+    def _check_loop_condition(self, condition: str, context_to_check: Optional[List[Dict[str, str]]] = None) -> bool:
         """
         【全新辅助方法】
         调用AI模型来判断给定的循环条件是否在当前上下文中得到满足。
+
+        Args:
+            condition (str): 需要检查的条件文本。
+            context_to_check (Optional[List[Dict[str, str]]]): 用于检查的特定上下文。如果为None，则使用 self.context。
         """
-        if not self.context:
+        # 决定使用哪个上下文进行检查：如果传入了临时上下文，则使用它，否则使用实例的默认上下文。
+        current_context = context_to_check if context_to_check is not None else self.context
+
+        if not current_context:
             print("[Controller] [LoopCheck] 上下文为空，无法判断条件，默认返回 False。")
             return False
 
         # 构造一个专门用于判断的、临时的消息列表
         prompt = f"请问以上对话中：“{condition}”这个条件是否已经完成？你只需要回答 True 或者 False，禁止回答其他任何内容。"
 
-        # 使用当前上下文，并附加我们的判断问题
-        messages_for_check = self.context + [{"role": "user", "content": prompt}]
+        # 使用指定的上下文，并附加我们的判断问题
+        messages_for_check = current_context + [{"role": "user", "content": prompt}]
 
         print(f"[Controller] [LoopCheck] 向AI发送条件检查请求...")
 
         # 为了节约成本和提高速度，可以使用一个比较轻量级的模型进行判断
         # 如果未指定，则使用默认模型
-        response = self.model_linker.create_completion(messages=messages_for_check, provider_name=self.modelmanager.get_default_provider_name(), model=self.modelmanager.get_default_provider_model())
+        response = self.model_linker.create_completion(messages=messages_for_check,
+                                                       provider_name=self.modelmanager.get_default_provider_name(),
+                                                       model=self.modelmanager.get_default_provider_model())
 
         if not response:
             print("[Controller] [LoopCheck] 未能从AI获取条件检查的响应，默认返回 False。")
