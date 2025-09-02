@@ -17,6 +17,7 @@ class GameController(QObject):
     ai_response = Signal(str)
     input_requested = Signal(str)
     game_finished = Signal()
+    step = Signal(str)
 
     _process_next_node_signal = Signal()
 
@@ -80,6 +81,8 @@ class GameController(QObject):
             return
 
         self._setup_game_state(workflow_id)
+
+        self.step.emit(self.current_workflow_name)
         self.node_keys = list(self.current_workflow_data.get("nodes", {}).keys())
 
         save_file = os.path.join(self.base_path, "saves", f"{slot_name}.json")
@@ -208,6 +211,7 @@ class GameController(QObject):
 
             # --- 1. AI生成与输出阶段 (每次迭代都执行) ---
             messages, _ = self._build_messages(step_data)
+            self.step.emit(self.current_workflow_name)
 
             ai_response = None
             if len(messages) <= 1 and not any(m['role'] == 'user' for m in messages):

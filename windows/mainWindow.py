@@ -22,7 +22,8 @@ class MainWindow(QMainWindow):
         self.is_left_panel_expanded = False
         self.splitter_state = None
 
-        self.last_ai_message_block: QTextBlock | None = None
+        self.last_ai_message_start_block = -1
+        self.last_ai_message_block_count = 0
         self._setup_text_formats()
 
         self.init_ui()
@@ -268,22 +269,26 @@ class MainWindow(QMainWindow):
         """向主输出面板追加带特定颜色和高亮逻辑的文本"""
 
         # 步骤 1: 将之前的AI消息变暗
-        # 如果新消息是'ai'，并且我们记录了上一个AI消息块，就执行此操作
-        if color_key == 'ai' and self.last_ai_message_block and self.last_ai_message_block.isValid():
-            # 创建一个指向旧块的临时光标
-            temp_cursor = QTextCursor(self.last_ai_message_block)
-            # 选中整个文本块的内容
-            temp_cursor.select(QTextCursor.SelectionType.BlockUnderCursor)
-            # 应用暗淡格式
-            temp_cursor.setCharFormat(self.ai_dim_format)
+        # 如果新消息是 'ai' 并且我们记录了上一个AI消息的范围
+        if color_key == 'ai' and self.last_ai_message_start_block != -1:
+            doc = self.output_box.document()
+            # 遍历上一个AI消息的所有块
+            for i in range(self.last_ai_message_block_count):
+                block_num = self.last_ai_message_start_block + i
+                block = doc.findBlockByNumber(block_num)
+                if block.isValid():
+                    # 创建一个指向该块的临时光标并应用暗淡格式
+                    temp_cursor = QTextCursor(block)
+                    temp_cursor.select(QTextCursor.SelectionType.BlockUnderCursor)
+                    temp_cursor.setCharFormat(self.ai_dim_format)
 
         # 步骤 2: 准备在文档末尾插入新消息
         cursor = self.output_box.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
 
-        # 如果输出框不为空，则先插入一个换行符，确保消息间有间距
+        # 如果输出框不为空，则先插入一个新段落，确保消息间有间距
         if not self.output_box.toPlainText() == "":
-            cursor.insertBlock()  # 插入一个新段落，比插入'\n'更规范
+            cursor.insertBlock()
 
         # 步骤 3: 根据 color_key 选择要应用的格式
         if color_key == 'ai':
@@ -295,22 +300,33 @@ class MainWindow(QMainWindow):
 
         # 步骤 4: 插入带格式的新文本
         cursor.setCharFormat(current_format)
+
+        # --- 关键修改：记录插入前的块编号 ---
+        start_block_num = cursor.blockNumber()
+
         cursor.insertText(text)
+
+        # --- 关键修改：记录插入后的块编号，并计算块数量 ---
+        end_block_num = cursor.blockNumber()
+        block_count = end_block_num - start_block_num + 1
 
         # 步骤 5: 如果刚插入的是AI消息，更新追踪器
         if color_key == 'ai':
-            self.last_ai_message_block = cursor.block()
+            self.last_ai_message_start_block = start_block_num
+            self.last_ai_message_block_count = block_count
         else:
-            # 如果是玩家或系统消息，我们不希望下一条AI消息把这个变暗
-            # 所以清空追踪器
-            self.last_ai_message_block = None
+            # 如果是玩家或系统消息，重置追踪器
+            self.last_ai_message_start_block = -1
+            self.last_ai_message_block_count = 0
 
-        # 步骤 6: 确保视图滚动到底部
-        self.output_box.ensureCursorVisible()
+        # 步骤 6: 确保视图滚动到底部 (更可靠的方法)
+        v_scrollbar = self.output_box.verticalScrollBar()
+        v_scrollbar.setValue(v_scrollbar.maximum())
 
     def clear_output(self):
         self.output_box.clear()
-        self.last_ai_message_block = None
+        self.last_ai_message_start_block = -1
+        self.last_ai_message_block_count = 0
 
     def open_settings_window(self):
         """打开设置窗口。"""

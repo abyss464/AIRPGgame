@@ -1,11 +1,11 @@
 import sys
 import os
 import json
-from PySide6.QtCore import Signal, QThread, Qt, QObject
+from PySide6.QtCore import Signal, QThread, Qt, QObject, Slot
 from PySide6.QtWidgets import (QWidget, QPushButton, QVBoxLayout, QLabel, QComboBox,
-                               QPlainTextEdit, QHBoxLayout, QApplication, QFormLayout,
+                               QPlainTextEdit, QHBoxLayout, QFormLayout,
                                QFrame)
-from PySide6.QtGui import QColor, QTextCharFormat, QTextCursor, QKeyEvent, QFont
+from PySide6.QtGui import QColor, QTextCharFormat, QTextCursor, QKeyEvent
 
 from core.GameController import GameController
 from core.ModelLinker import ModelLinker
@@ -43,20 +43,25 @@ class AttributeWorker(QThread):
 
         # ---【请根据您的配置修改】---
         # 定义用于属性规范化的模型。建议使用一个速度快、成本低的强大模型。
-        self.NORMALIZATION_PROVIDER = "openai"  # 例如: "openai", "deepseek", "ollama"
-        self.NORMALIZATION_MODEL = "gpt-3.5-turbo"  # 例如: "gpt-3.5-turbo", "deepseek-coder"
+        self.NORMALIZATION_PROVIDER = model_linker.get_manager().get_default_provider_name()
+        self.NORMALIZATION_MODEL = model_linker.get_manager().get_default_provider_model()
         # -----------------------------
 
     def run(self):
         try:
             with open(self.file_path, 'r', encoding='utf-8') as f:
-                content = f.read()
+                content = f.read().strip()
+
+            if not content:
+                self.finished.emit({}, "属性文件为空。")
+                return
 
             # 1. 尝试直接解析为JSON
             try:
                 data = json.loads(content)
+                print("属性文件是有效的JSON，直接加载。")
                 self.finished.emit(data, "")
-                return  # 成功解析，任务完成
+                return
             except json.JSONDecodeError:
                 # 2. 如果不是JSON，则视为自然语言，调用AI进行规范化
                 print(f"内容非JSON，将使用AI进行规范化: {self.NORMALIZATION_PROVIDER}/{self.NORMALIZATION_MODEL}")
@@ -64,8 +69,8 @@ class AttributeWorker(QThread):
                 system_prompt = (
                     "你是一个数据提取与格式化助手。"
                     "你的任务是将用户提供的关于游戏角色的自然语言描述，转换成一个结构清晰的JSON对象。"
-                    "请对属性进行逻辑分组，例如将力量、敏捷等归入 'attributes' 或 '能力' 键下。"
-                    "确保输出的是一个格式完全正确的、可以直接被程序解析的JSON对象，不要在JSON对象前后添加任何额外的解释性文字、代码块标记(```json)或注释。"
+                    "请对属性进行逻辑分组，例如将力量、敏捷等归入 'attributes'或'能力'键下；将物品、装备归入 'inventory'或'物品'键下。"
+                    "确保输出的是一个格式完全正确的、可以直接被程序解析的JSON对象。不要在JSON对象前后添加任何额外的解释性文字、代码块标记(```json)或注释。"
                 )
 
                 messages = [
@@ -81,18 +86,24 @@ class AttributeWorker(QThread):
                         model=self.NORMALIZATION_MODEL
                     )
 
+                    # 尝试清理AI可能返回的代码块标记
+                    if ai_response_str.startswith("```json"):
+                        ai_response_str = ai_response_str[7:]
+                    if ai_response_str.endswith("```"):
+                        ai_response_str = ai_response_str[:-3]
+                    ai_response_str = ai_response_str.strip()
+
                     # 3. 解析AI的响应
                     try:
                         normalized_data = json.loads(ai_response_str)
                         self.finished.emit(normalized_data, "")
                     except json.JSONDecodeError:
-                        # AI返回的不是有效的JSON
                         error_msg = f"AI模型返回了无效的JSON格式数据。\n响应内容: {ai_response_str[:200]}..."
                         self.finished.emit({}, error_msg)
 
                 except Exception as e:
                     # API调用失败
-                    error_msg = f"调用AI模型时发生错误: {e}"
+                    error_msg = f"调用AI模型({self.NORMALIZATION_PROVIDER}/{self.NORMALIZATION_MODEL})时发生错误: {e}"
                     self.finished.emit({}, error_msg)
 
         except FileNotFoundError:
@@ -314,6 +325,7 @@ class GameCard(QWidget):
         self.game_thread = QThread()
         self.controller = GameController()
         self.controller.moveToThread(self.game_thread)
+        self.controller.step.connect(self.load_attributes)
         self.controller.ai_response.connect(self.append_log_ai)
         self.controller.input_requested.connect(self.handle_input_request)
         self.controller.game_finished.connect(self.game_thread.quit)
@@ -329,21 +341,29 @@ class GameCard(QWidget):
 
         self.game_thread.start()
 
+    @Slot(str)
     def load_attributes(self, workflow_name: str):
         if not self.model_linker:
             self.attribute_pane.update_attributes({}, "错误: AI模型链接器未初始化。")
             return
 
-        attribute_file = os.path.join("aifiles", workflow_name, "character_sheet.txt")
-        self.attribute_pane.update_attributes({}, "正在加载并解析属性...")
+        # 路径从 'aifiles' 修改为 'aifile' 以匹配 GameController
+        attribute_file = os.path.join("aifile", workflow_name, "character_sheet.txt")
+        self.attribute_pane.update_attributes({}, f"正在从\n{attribute_file}\n加载并解析属性...")
+
+        # 检查上一个worker是否还在运行，避免重复启动
+        if self.attribute_worker and self.attribute_worker.isRunning():
+            print("警告：上一个属性加载任务仍在进行中。")
+            return
 
         if os.path.exists(attribute_file):
-            self.attribute_worker = AttributeWorker(attribute_file, self.model_linker)  # 传递linker
+            self.attribute_worker = AttributeWorker(attribute_file, self.model_linker)
             self.attribute_worker.finished.connect(self.attribute_pane.update_attributes)
+            # 确保worker线程结束后被清理
             self.attribute_worker.finished.connect(self.attribute_worker.deleteLater)
             self.attribute_worker.start()
         else:
-            self.attribute_pane.update_attributes({}, f"未找到属性文件:\n{attribute_file}")
+            self.attribute_pane.update_attributes({}, f"信息: 未找到属性文件\n{attribute_file}")
 
     def start_new_game(self):
         workflow_name = self.combo_workflows.currentText()

@@ -22,6 +22,9 @@ class ModelLinker:
             raise TypeError("config_manager 必须是 ModelConfigManager 的一个实例。")
         self.manager = config_manager
 
+    def get_manager(self):
+        return self.manager
+
     def create_completion(self,
                           messages: List[Dict[str, str]],
                           provider_name: Optional[str] = None,
