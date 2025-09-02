@@ -163,6 +163,7 @@ class GameCard(QWidget):
         temp_controller = GameController();
         self.populate_workflows(temp_controller.workflows);
         del temp_controller
+        print("清理完成")
 
     def handle_input_request(self, prompt: str):
         self.input_widget.setEnabled(True);
