@@ -35,8 +35,9 @@ class AppController:
         self.flow_manager_card.return_to_menu_requested.connect(self.show_start_card)
         self.flow_manager_card.send_log.connect(self.on_log_request)
 
-    def on_log_request(self, text: str):
-        self.win.append_output(text)
+    def on_log_request(self, text: str, color_key: str):
+        """接收日志文本和颜色键，并传递给主窗口"""
+        self.win.append_output(text, color_key)
 
     def start(self):
         """应用程序的入口点"""

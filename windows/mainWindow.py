@@ -4,7 +4,7 @@ from PySide6.QtWidgets import (
     QTextEdit, QPushButton, QSplitter, QScrollArea
 )
 from PySide6.QtCore import Qt, QSize, Signal, QObject
-from PySide6.QtGui import QIcon, QFont
+from PySide6.QtGui import QIcon, QFont, QColor, QTextCharFormat, QTextCursor, QTextBlock
 
 import windows.settingWindow as settingWindow
 
@@ -19,15 +19,37 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("RPG")
         self.setGeometry(100, 100, 1600, 900)
         self.settings_window = None
-
-        # --- 新增：状态变量 ---
-        # 用于跟踪左侧面板是否已经最大化
         self.is_left_panel_expanded = False
-        # 用于存储分裂器在收起前的状态
         self.splitter_state = None
+
+        self.last_ai_message_block: QTextBlock | None = None
+        self._setup_text_formats()
 
         self.init_ui()
         self.apply_styles()
+
+    def _setup_text_formats(self):
+        """一次性创建所有文本格式，提高效率"""
+        # 玩家输入的格式 (亮蓝色)
+        self.player_format = QTextCharFormat()
+        self.player_format.setForeground(QColor("#61afef"))
+        self.player_format.setFont(QFont("Consolas", 11))
+
+        # AI回复的格式 - 最新/明亮 (亮紫色, 粗体)
+        self.ai_bright_format = QTextCharFormat()
+        self.ai_bright_format.setForeground(QColor("#c678dd"))
+        bright_font = QFont("Consolas", 11, QFont.Bold)
+        self.ai_bright_format.setFont(bright_font)
+
+        # AI回复的格式 - 旧/暗淡 (暗淡的灰色文本，非紫色，以示区别)
+        self.ai_dim_format = QTextCharFormat()
+        self.ai_dim_format.setForeground(QColor("#7f848e"))  # 使用暗灰色
+        self.ai_dim_format.setFont(QFont("Consolas", 11))
+
+        # 默认/系统消息格式 (绿色)
+        self.system_format = QTextCharFormat()
+        self.system_format.setForeground(QColor("#98c379"))
+        self.system_format.setFont(QFont("Consolas", 11))
 
     def init_ui(self):
         """初始化用户界面布局和控件。"""
@@ -242,12 +264,53 @@ class MainWindow(QMainWindow):
             if widget is not None:
                 widget.setParent(None)
 
-    def append_output(self, text: str):
-        self.output_box.append(text)
-        self.output_box.verticalScrollBar().setValue(self.output_box.verticalScrollBar().maximum())
+    def append_output(self, text: str, color_key: str):
+        """向主输出面板追加带特定颜色和高亮逻辑的文本"""
+
+        # 步骤 1: 将之前的AI消息变暗
+        # 如果新消息是'ai'，并且我们记录了上一个AI消息块，就执行此操作
+        if color_key == 'ai' and self.last_ai_message_block and self.last_ai_message_block.isValid():
+            # 创建一个指向旧块的临时光标
+            temp_cursor = QTextCursor(self.last_ai_message_block)
+            # 选中整个文本块的内容
+            temp_cursor.select(QTextCursor.SelectionType.BlockUnderCursor)
+            # 应用暗淡格式
+            temp_cursor.setCharFormat(self.ai_dim_format)
+
+        # 步骤 2: 准备在文档末尾插入新消息
+        cursor = self.output_box.textCursor()
+        cursor.movePosition(QTextCursor.MoveOperation.End)
+
+        # 如果输出框不为空，则先插入一个换行符，确保消息间有间距
+        if not self.output_box.toPlainText() == "":
+            cursor.insertBlock()  # 插入一个新段落，比插入'\n'更规范
+
+        # 步骤 3: 根据 color_key 选择要应用的格式
+        if color_key == 'ai':
+            current_format = self.ai_bright_format
+        elif color_key == 'player':
+            current_format = self.player_format
+        else:  # 'system'或其他
+            current_format = self.system_format
+
+        # 步骤 4: 插入带格式的新文本
+        cursor.setCharFormat(current_format)
+        cursor.insertText(text)
+
+        # 步骤 5: 如果刚插入的是AI消息，更新追踪器
+        if color_key == 'ai':
+            self.last_ai_message_block = cursor.block()
+        else:
+            # 如果是玩家或系统消息，我们不希望下一条AI消息把这个变暗
+            # 所以清空追踪器
+            self.last_ai_message_block = None
+
+        # 步骤 6: 确保视图滚动到底部
+        self.output_box.ensureCursorVisible()
 
     def clear_output(self):
         self.output_box.clear()
+        self.last_ai_message_block = None
 
     def open_settings_window(self):
         """打开设置窗口。"""

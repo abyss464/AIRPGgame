@@ -7,13 +7,10 @@ from PySide6.QtWidgets import (QWidget, QPushButton, QVBoxLayout, QLabel, QCombo
                                QFrame)
 from PySide6.QtGui import QColor, QTextCharFormat, QTextCursor, QKeyEvent, QFont
 
-# --- 核心依赖项导入 ---
 from core.GameController import GameController
 from core.ModelLinker import ModelLinker
 from manager.model_config_manager import ModelConfigManager
 
-
-# 【无变化】: 自定义输入框
 class ExpandingInput(QPlainTextEdit):
     send_requested = Signal()
     FIXED_LINES = 5
@@ -184,7 +181,7 @@ class AttributePane(QWidget):
 # 【GameCard】: 集成AI调用逻辑
 class GameCard(QWidget):
     return_to_menu_requested = Signal()
-    send_log = Signal(str)
+    send_log = Signal(str, str)
     request_start_game = Signal(str)
     request_load_game = Signal(str, str)
 
@@ -362,7 +359,7 @@ class GameCard(QWidget):
         if self.controller:
             text = self.input_line.toPlainText().strip()
             if text:
-                self.append_log_player(text)
+                self.send_log.emit(f"[玩家] {text}", "player")
                 self.controller.submit_user_input(text)
                 self.input_widget.setEnabled(False)
                 self.input_line.clear()
@@ -418,7 +415,7 @@ class GameCard(QWidget):
         self.log_console.ensureCursorVisible()
 
     def append_log_ai(self, text: str):
-        self.send_log.emit(f"[游戏] {text}")
+        self.send_log.emit(f"[游戏] {text}", "ai")
         self.append_log_formatted(text, 'black', '[游戏]')
 
     def append_log_player(self, text: str):

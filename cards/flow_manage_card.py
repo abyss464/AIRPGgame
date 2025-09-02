@@ -287,7 +287,7 @@ class PromptBuilderDialog(QDialog):
 
 
 class HierarchicalFlowManagerUI(QWidget):
-    send_log = Signal(str)
+    send_log = Signal(str, str)
     return_to_menu_requested = Signal()
 
     def __init__(self, parent=None):
@@ -494,7 +494,7 @@ class HierarchicalFlowManagerUI(QWidget):
         dialog = PromptBuilderDialog(self)
         if dialog.exec():
             self.step_prompt_edit.setText(dialog.get_final_prompt())
-            self.send_log.emit("使用构造器更新了提示词。")
+            self.send_log.emit("使用构造器更新了提示词。", "system")
 
     def _populate_tree(self):
         _, selected_id, _ = self._get_selected_item_info()
@@ -695,5 +695,5 @@ class HierarchicalFlowManagerUI(QWidget):
                 self.manager.edit_step(parent_ids["wf_id"], parent_ids["node_id"], item_id, updates)
                 # --- 结束修改 ---
 
-            self.send_log.emit(f"更新了 {item_type}: {item_id}")
+            self.send_log.emit(f"更新了 {item_type}: {item_id}", "system")
             self._populate_tree()
