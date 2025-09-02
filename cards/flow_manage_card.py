@@ -436,7 +436,7 @@ class HierarchicalFlowManagerUI(QWidget):
         step_layout.addRow("模型:", self.step_model_combo)
         step_layout.addRow("从文件读入:", self.step_read_file_edit)
         step_layout.addRow("存入指定文件:", self.step_save_file_edit)
-        step_layout.addRow("使用用户输入:", self.step_use_user_context_check)
+        step_layout.addRow("允许用户输入:", self.step_use_user_context_check)
         step_layout.addRow("使用上下文:", self.step_use_context_check)
         step_layout.addRow("保存输出到上下文:", self.step_save_context_check)
         step_layout.addRow("并行执行:", self.step_parallel_check)
