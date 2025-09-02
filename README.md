@@ -56,7 +56,7 @@
 
 1.  克隆本仓库到本地：
     ```bash
-    git clone <your-repo-url>
+    git clone https://github.com/abyss464/AIRPGgame.git
     cd <repo-folder>
     ```
 
